@@ -1,0 +1,7 @@
+MUJOCO_LOG.TXT
+bin/
+include/
+lib/
+share/
+environment/__pychache__
+experiments/__pychache__
