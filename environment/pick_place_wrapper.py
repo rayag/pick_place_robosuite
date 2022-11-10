@@ -1,6 +1,7 @@
 import robosuite as suite
 import gym
 from robosuite.wrappers import GymWrapper
+from robosuite.robots.single_arm import SingleArm
 
 PICK_PLACE_DEFAULT_ENV_CFG = {
     "env_name": "PickPlaceCan",
@@ -12,12 +13,13 @@ PICK_PLACE_DEFAULT_ENV_CFG = {
     "use_camera_obs": False,
     "use_object_obs": True,
     "ignore_done": True,
-    "horizon": 500
+    "horizon": 500,
+    "controller_configs": None 
 }
 
 class PickPlaceWrapper(gym.Env):
     def __init__(self, env_config = PICK_PLACE_DEFAULT_ENV_CFG) -> None:
-        self.env = GymWrapper(suite.make(
+        self.gym_env = GymWrapper(suite.make(
             env_name=env_config['env_name'], 
             robots=env_config['robots'],
             gripper_types=env_config['gripper_types'],
@@ -28,16 +30,20 @@ class PickPlaceWrapper(gym.Env):
             use_camera_obs=env_config['use_camera_obs'],
             use_object_obs=env_config['use_object_obs'],
             ignore_done=env_config['ignore_done'],
-            horizon=env_config['horizon']
+            horizon=env_config['horizon'],
+            controller_configs=env_config['controller_configs']
         ))
-        self.observation_space = self.env.observation_space
-        self.action_space = self.env.action_space
+        self.observation_space = self.gym_env.observation_space
+        self.action_space = self.gym_env.action_space
 
     def reset(self):
-        return self.env.reset()
+        return self.gym_env.reset()
+
+    def reset_to(self, state):
+        self.gym_env.env.sim.set_state_from_flattened(state)
 
     def render(self):
-        self.env.render()
+        self.gym_env.render()
 
     def step(self, action):
-        return self.env.step(action=action)
+        return self.gym_env.step(action=action)

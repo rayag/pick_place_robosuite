@@ -3,6 +3,11 @@ bin/
 include/
 lib/
 share/
-environment/__pychache__
-experiments/__pychache__
-rl_agent/__pychache__
+__pychache__/
+*/__pychache__/
+environment/__pycache__/
+experiments/__pycache__/
+rl_agent/__pycache__/
+replay_buffer/__pycache__/
+vis/__pycache__/
+data/
