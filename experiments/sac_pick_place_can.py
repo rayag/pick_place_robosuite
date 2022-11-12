@@ -85,8 +85,12 @@ def train_sac_pick_place_can_expert():
     env_cfg = PICK_PLACE_DEFAULT_ENV_CFG
     env_cfg['controller_configs'] = ctr_cfg
     agent = SACAgent(env_config=env_cfg, config=config)
-    cp_path, analysis = agent.train(stop_criteria=stop, checkpoint_freq=10)
-    print(f"Best agent {cp_path}")
+    env = PickPlaceWrapper(env_config=env_cfg)
+    action = np.zeros(shape=(7,))
+    obs, reward, done, info = env.step()
+    print(obs)
+    # cp_path, analysis = agent.train(stop_criteria=stop, checkpoint_freq=10)
+    # print(f"Best agent {cp_path}")
 
 BEST_CHECKPOINT_WITH_EXPERT_PATH = "/home/raya/ray_results/SAC_2022-11-09_18-30-48/SAC_PickPlaceWrapper_de340_00000_0_2022-11-09_18-30-48/checkpoint_002000"
 BEST_CHECKPOINT_PATH = "/home/raya/ray_results/SAC/SAC_PickPlaceCan-Panda_e4405_00000_0_2022-11-07_00-03-49/checkpoint_010000"

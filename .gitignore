@@ -11,3 +11,4 @@ rl_agent/__pycache__/
 replay_buffer/__pycache__/
 vis/__pycache__/
 data/
+video/
