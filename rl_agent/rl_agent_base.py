@@ -13,7 +13,7 @@ class RLAgentBase:
     def load(self, path: str) -> None:
         pass
     
-    def test(self, num_episodes: int = 10, max_steps_per_episode: int = 1000, env_config = None) -> None:
+    def test(self, num_episodes: int = 10, max_steps_per_episode: int = 500, env_config = None) -> None:
         if self.agent is None:
             print("Agent not set. Do load before test.")
             return

@@ -1,8 +1,12 @@
 import robosuite as suite
 import gym
+import h5py
 from robosuite.wrappers import GymWrapper
 from robosuite.environments.manipulation.pick_place import PickPlace
-import numpy as np
+
+DEMO_PATH = "/home/raya/uni/ray_test/data/demo/low_dim.hdf5"
+
+ctr_cfg = suite.load_controller_config(default_controller="OSC_POSE")
 
 PICK_PLACE_DEFAULT_ENV_CFG = {
     "env_name": "PickPlaceCan",
@@ -15,8 +19,9 @@ PICK_PLACE_DEFAULT_ENV_CFG = {
     "use_object_obs": True,
     "ignore_done": True,
     "horizon": 500,
-    "controller_configs": None,
-    "camera_names": ['agentview']
+    "controller_configs": ctr_cfg,
+    "pick_only": False,
+    "camera_names": ['frontview']
 }
 
 class PickPlaceWrapper(gym.Env):
@@ -38,18 +43,45 @@ class PickPlaceWrapper(gym.Env):
         ))
         self.observation_space = self.gym_env.observation_space
         self.action_space = self.gym_env.action_space
+        self.pick_only = env_config['pick_only']
 
     def reset(self):
         return self.gym_env.reset()
 
     def reset_to(self, state):
         self.gym_env.env.sim.set_state_from_flattened(state)
+        self.gym_env.env.sim.forward()
+        return self.gym_env._flatten_obs(self.gym_env.env._get_observations(force_update=True))
 
     def render(self):
         self.gym_env.render()
 
     def step(self, action):
-        return self.gym_env.step(action=action)
+        obs, reward, _, info = self.gym_env.step(action=action)
+        if self.pick_only:
+            _, grasp, _, _ = self.gym_env.env.staged_rewards()
+            if (grasp > 0):
+                reward = 1
+            else:
+                reward = reward * 2
+        return obs, reward, reward == 1.0, info
+
+class PickPlaceSameState(PickPlaceWrapper):
+    def __init__(self, env_config=PICK_PLACE_DEFAULT_ENV_CFG) -> None:
+        super().__init__(env_config)
+        # Note: This works with a locally modified version of RS
+        self.gym_env.env.can_fixed_position = True
+        self.fixed_state = self.get_state_from_demo()
+
+    def reset(self):        
+        r = super().reset_to(self.fixed_state)
+        return r
+
+    def get_state_from_demo(self):
+        with h5py.File(DEMO_PATH, "r+") as f:
+            demos = list(f['data'].keys())
+            states = f["data/{}/states".format(demos[0])][()]
+            return states[0]
 
 class PickPlaceWrapperRs(PickPlace):
     def __init__(self, env_config = PICK_PLACE_DEFAULT_ENV_CFG) -> None:

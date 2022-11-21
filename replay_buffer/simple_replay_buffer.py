@@ -17,12 +17,12 @@ def collect_observations():
     Adds scaled reward values and flat observations to the dataset
     This speeds up the process of getting the data afterwards
     '''
-    ctr_cfg = suite.load_controller_config(default_controller="OSC_POSE")
     env_cfg = PICK_PLACE_DEFAULT_ENV_CFG
-    env_cfg['controller_configs'] = ctr_cfg
     env = PickPlaceWrapper()
     with h5py.File(DEMO_PATH, "r+") as f:
         demos = list(f['data'].keys())
+        print(f"Total episodes {len(demos)}")
+        sum_steps = 0
         for i in range(len(demos)):
             ep = demos[i]
             ep_id = int(demos[i][5:])
@@ -33,6 +33,7 @@ def collect_observations():
             next_obs_arr = np.zeros(shape=(acts.shape[0], 46))
             observation = None
             env.reset_to(states[0])
+            sum_steps += states.shape[0]
             for t in range(states.shape[0]):
                 action = acts[t]
                 next_observation, reward, done, _ = env.step(action)
@@ -48,8 +49,9 @@ def collect_observations():
             f.create_dataset("data/{}/obs_flat".format(ep), data=obs_arr)
             del f["data/{}/next_obs_flat".format(ep)]
             f.create_dataset("data/{}/next_obs_flat".format(ep), data=next_obs_arr)
+        print(f"Mean steps per episode {sum_steps / len(demos)}")
 
-def extract_sample_batch_from_demo():
+def extract_sample_batch_from_demo(n: int = 200):
     with h5py.File(DEMO_PATH, "r+") as f:
         obs = np.empty(shape=(0, 46)) # TODO: remove magic value
         next_obs = np.empty(shape=(0, 46))
@@ -60,7 +62,11 @@ def extract_sample_batch_from_demo():
         dones = np.array([])
         
         demos = list(f['data'].keys())
-        for i in range(len(demos)):
+        if (n > len(demos)):
+            print(f"n = {n} greater than the number of episodes {len(demos)}")
+            return
+
+        for i in range(n):
             ep = demos[i]
             ep_id = int(demos[i][5:])
             actions_ep = f["data/{}/actions".format(ep)][()]
@@ -93,12 +99,16 @@ def extract_sample_batch_from_demo():
 class SimpleReplayBuffer(PrioritizedReplayBuffer):
     def __init__(self, capacity: int = 10000, storage_unit: Union[str, StorageUnit] = "timesteps", **kwargs):
         super().__init__(capacity, storage_unit, **kwargs)
-        self._expert_replay_buffer = ReplayBuffer()
-        self._expert_replay_buffer.add(extract_sample_batch_from_demo())
+        self._expert_replay_buffer = ReplayBuffer(storage_unit=storage_unit)
+        self._expert_replay_buffer.add(extract_sample_batch_from_demo(1))
+        self.expert_ratio = 1
 
     def sample(self, num_items: int, **kwargs) -> Optional[SampleBatchType]:
-        num_items_from_experience = int(num_items * 0.9)
+        print(f"NUM ITEMS: {num_items}")
+        num_items_from_experience = int(num_items * (1 - self.expert_ratio))
         num_items_from_expert = num_items - num_items_from_experience
+        # if self.expert_ratio > 0.1:
+        #     self.expert_ratio -= 0.01
         experience_sample = super().sample(num_items_from_experience, 0, **kwargs)
         expert_sample = self._expert_replay_buffer.sample(num_items_from_expert)
         return experience_sample.concat(expert_sample)

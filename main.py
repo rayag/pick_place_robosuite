@@ -3,6 +3,7 @@ from ray.rllib.utils.replay_buffers import ReplayBuffer, StorageUnit
 from ray.rllib.policy.sample_batch import SampleBatch 
 from replay_buffer.simple_replay_buffer import SimpleReplayBuffer, DEMO_PATH
 from experiments.sac_pick_place_can import *
+from experiments.ddpg_pick_place_can import *
 from vis.visualize import *
 
 import h5py
@@ -18,6 +19,7 @@ def play_demos(n: int, record_video = False, video_path = "./video"):
     ctr_cfg = suite.load_controller_config(default_controller="OSC_POSE")
     env_cfg = PICK_PLACE_DEFAULT_ENV_CFG
     env_cfg['controller_configs'] = ctr_cfg
+    env_cfg['pick_only'] = True
     if record_video:
         env_cfg['has_offscreen_renderer'] = True
         env_cfg['use_camera_obs'] = True
@@ -25,13 +27,14 @@ def play_demos(n: int, record_video = False, video_path = "./video"):
     else:
         env_cfg['has_renderer'] = True
 
-    env = PickPlaceWrapperRs(env_config=env_cfg)
+    env = PickPlaceWrapper(env_config=env_cfg)
     actions = list()
     video_writer = None
     input("Press Enter to continue...")
     with h5py.File(DEMO_PATH, "r") as f:
         demos = list(f['data'].keys())
         indices = np.random.randint(0, len(demos), size=n) # random demos indices
+        print(f"Episodes: {len(demos)}")
         for i in range(n):
             ep = demos[indices[i]]
             print(f"Playing {ep}..")
@@ -42,10 +45,12 @@ def play_demos(n: int, record_video = False, video_path = "./video"):
             states = f["data/{}/states".format(ep)][()]
             actions = f["data/{}/actions".format(ep)][()]
             rs = f["data/{}/rewards".format(ep)][()]
+            dones = f["data/{}/dones".format(ep)][()]
             env.reset_to(states[0])
             for ac_i in range(actions.shape[0]):
                 action = actions[ac_i]
-                obs, _, _, _ = env.step(action)
+                obs, reward, done, _ = env.step(action)
+                print(f"Reward: {reward} {rs[ac_i]} Done: {done} {dones[ac_i]}")
                 if record_video:
                     video_writer.append_data(np.rot90(np.rot90((obs['frontview_image']))))
                 else:
@@ -54,10 +59,7 @@ def play_demos(n: int, record_video = False, video_path = "./video"):
                 video_writer.close()
 
 def main():
-    play_demos(5, record_video=False)
-    # visulize_from_progress_csv("/home/raya/ray_results/SAC_2022-11-09_18-30-48/SAC_PickPlaceWrapper_de340_00000_0_2022-11-09_18-30-48/progress.csv")
-    # visulize_from_progress_csv("/home/raya/ray_results/SAC/SAC_PickPlaceCan-Panda_e4405_00000_0_2022-11-07_00-03-49/progress.csv")
-    # agent = PickPlaceWrapper()
+    train_ddpg_original_api()
     
 if __name__ == "__main__":
     main()

@@ -14,9 +14,6 @@ class SACAgent(RLAgentBase):
             stop=stop_criteria,
             checkpoint_at_end=True,
             checkpoint_freq=checkpoint_freq,
-            resume=True,
-            # local_dir="/home/raya/ray_results/SAC_2022-11-09_22-46-16/SAC_PickPlaceWrapper_8e43d_00000_0_2022-11-09_22-46-16/",
-            restore="/home/raya/ray_results/SAC/SAC_PickPlaceWrapper_ba0f3_00000_0_2022-11-09_23-16-07/checkpoint_000010/checkpoint-10"
         )
         # list of lists: one list per checkpoint; each checkpoint list contains 1st the path, 2nd the metric value
         checkpoints = analysis.get_trial_checkpoints_paths(trial=analysis.get_best_trial('episode_reward_mean'),
