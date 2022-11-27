@@ -7,7 +7,7 @@ import numpy as np
 from robosuite.wrappers import GymWrapper
 from rl_agent.sac_agent import SACAgent
 from environment.pick_place_wrapper import PICK_PLACE_DEFAULT_ENV_CFG, PickPlaceWrapper, PickPlaceSameState
-from replay_buffer.simple_replay_buffer import SimpleReplayBuffer
+from replay_buffer.custom_ray_replay_buffer import CustomRayReplayBuffer
 
 def train_sac_pick_place_can(path = None):
     ray.shutdown()
@@ -70,7 +70,7 @@ def train_sac_pick_place_can_expert():
         "fcnet_hiddens": [256, 256]
     }
     config['replay_buffer_config'] = {
-        "type": SimpleReplayBuffer,
+        "type": CustomRayReplayBuffer,
         "capacity": int(1e6),
         "prioritized_replay": False,
         "prioritized_replay_alpha": 0.6,
@@ -118,7 +118,7 @@ def train_sac_pick_place_same_start(cont_training: bool = False, path: str = Non
     config["learning_starts"] = 3300
     config["evaluation_duration"] = 1000
     config['replay_buffer_config'] = {
-        "type": SimpleReplayBuffer,
+        "type": CustomRayReplayBuffer,
         "capacity": int(1e6),
         "prioritized_replay": False,
         "prioritized_replay_alpha": 0.6,

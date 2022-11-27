@@ -10,16 +10,20 @@ class PickPlaceGoal(gym.Env):
         self.goal_dim = 3 # coordinates of the object
         self.observation_space = self.env_wrapper.gym_env.observation_space
         self.action_space = self.env_wrapper.gym_env.action_space
-        self.goal = self.generate_goal()
 
     def step(self, action):
         obs, _, done, info = self.env_wrapper.step(action)
-        return np.concatenate([self.goal, obs]), self.calc_reward(), done, info
+        rs_env = self.env_wrapper.gym_env.env
+        print(rs_env._gripper_to_target(
+                    gripper=rs_env.robots[0].gripper,
+                    target=rs_env.objects[3].root_body,
+                    target_type="body",
+                    return_distance=True,
+                ))
+        return obs, 0, done, info
 
     def reset(self):
-        obs = self.env_wrapper.reset()
-        self.goal = self.generate_goal()
-        return np.concatenate([self.goal, obs])
+        return self.env_wrapper.reset()
 
     def set_goal(self, new_goal):
         self.goal = new_goal
@@ -39,13 +43,16 @@ class PickPlaceGoal(gym.Env):
     def reset_to(self, state):
         return self.env_wrapper.reset_to(state)
 
-    def calc_reward(self):
+    def calc_reward(self, goal):
         rs_env = self.env_wrapper.gym_env.env
         obj_pos = rs_env.sim.data.body_xpos[rs_env.obj_body_id['Can']]
-        goal_reached = np.abs(obj_pos[0] - self.goal[0]) < rs_env.bin_size[0] / 4.0 \
-            and np.abs(obj_pos[1] - self.goal[1]) < rs_env.bin_size[1] / 4.0        \
-            and np.abs(obj_pos[2] - self.goal[2]) < 0.1
+        goal_reached = np.abs(obj_pos[0] - goal[0]) < rs_env.bin_size[0] / 4.0 \
+            and np.abs(obj_pos[1] - goal[1]) < rs_env.bin_size[1] / 4.0        \
+            and np.abs(obj_pos[2] - goal[2]) < 0.1
         return 1.0 if goal_reached else 0.0
+
+    def calc_reward_reach(self, goal, obs):
+        pass
 
     def render(self):
         self.env_wrapper.render()

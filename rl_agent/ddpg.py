@@ -1,0 +1,181 @@
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim
+import gym
+import os
+import numpy as np
+from replay_buffer.simple_replay_buffer import SimpleReplayBuffer
+from datetime import datetime
+from environment.pick_place_wrapper import PickPlaceWrapper, PICK_PLACE_DEFAULT_ENV_CFG
+from logger.logger import ProgressLogger
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+BASE_RESULTS_PATH = '/home/raya/uni/results/'
+
+class ActorNetwork(nn.Module): 
+    def __init__(self, obs_dim, action_dim, action_high = 1.0, action_low = 0.0) -> None:
+        super(ActorNetwork, self).__init__()
+        self.action_high = action_high
+        self.action_low = action_low
+        self.input = nn.Linear(obs_dim, 256).to(device) #TODO: allow custom layer sizes
+        torch.nn.init.xavier_uniform_(self.input.weight)
+        self.h1 = nn.Linear(256, 256).to(device)
+        torch.nn.init.xavier_uniform_(self.h1.weight)
+        self.output = nn.Linear(256, action_dim).to(device)
+        torch.nn.init.xavier_uniform_(self.output.weight)
+
+    def forward(self, obs):
+        x = F.relu(self.input(obs))
+        x = F.relu(self.h1(x))
+        action = torch.mul(torch.tanh(self.output(x)), self.action_high)
+        return action
+
+class CriticNetwork(nn.Module):
+    def __init__(self, dim) -> None:
+        super().__init__()
+        self.input = nn.Linear(dim, 256).to(device)
+        torch.nn.init.xavier_uniform_(self.input.weight)
+        self.h = nn.Linear(256, 256).to(device)
+        torch.nn.init.xavier_uniform_(self.h.weight)
+        self.output = nn.Linear(256, 1).to(device)
+        torch.nn.init.xavier_uniform_(self.output.weight)
+
+    def forward(self, s, a):
+        x = F.relu(self.input(torch.cat([s, a], 1)))
+        x = F.relu(self.h(x))
+        out = self.output(x)
+        return out
+
+class DDPGAgent:
+    def __init__(self, env, obs_dim, action_dim, update_iterations = 2, batch_size = 256, use_experience = True, update_period = 1, descr = "") -> None:
+        self.env = env
+        self.obs_dim = obs_dim
+        self.action_dim = action_dim
+        self.replay_buffer = SimpleReplayBuffer(obs_dim=self.obs_dim, action_dim=self.action_dim)
+        if use_experience:
+            self.replay_buffer.load_examples_from_file()
+
+        self.actor = ActorNetwork(obs_dim=self.obs_dim, action_dim=self.action_dim).cuda()
+        self.actor_target = ActorNetwork(obs_dim=self.obs_dim, action_dim=self.action_dim).cuda()
+        self.actor_target.load_state_dict(self.actor.state_dict())
+        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=1e-4)
+
+        self.critic = CriticNetwork(dim=self.obs_dim + self.action_dim).cuda()
+        self.critic_target = CriticNetwork(dim=self.obs_dim + self.action_dim).cuda()
+        self.critic_target.load_state_dict(self.critic.state_dict())
+        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=5e-3)
+
+        self.update_iterations = update_iterations
+        self.batch_size = batch_size
+        self.gamma = 0.99
+        self.polyak = 0.995
+        date_str = datetime.today().strftime('%Y-%m-%d-%H-%M-%S')
+        self.path = os.path.join(BASE_RESULTS_PATH, "DDPG-" + descr + date_str)
+        if not os.path.exists(self.path):
+            os.makedirs(self.path)
+        self.logger = ProgressLogger(self.path)
+        self.timesteps_before_start_training = 500
+        self.update_period = update_period
+
+    def rollout(self, episodes = 10, steps = 250):
+        for ep in range(episodes):
+            obs = self.env.reset()
+            t = 0
+            done = False
+            ep_return = 0
+            while not done and t < steps:
+                obs = torch.FloatTensor(obs).to(device)
+                action = self.actor(obs)
+                action_dateched = action.cpu().detach().numpy()\
+                    .clip(self.env.action_space.low, self.env.action_space.high)
+                next_obs, reward, done, _ = self.env.step(action_dateched)
+                obs = next_obs
+                t += 1
+                ep_return += reward
+                self.env.render()
+            print(f"Episode {ep}: return {ep_return}")
+
+    def train(self, iterations=2000, episode_len=500):
+        for it in range(iterations):
+            obs = self.env.reset()
+            episode_return = 0
+            # Gather experience
+            t = 0
+            actor_loss, critic_loss = 0, 0
+            while t < episode_len:
+                obs = torch.FloatTensor(obs).to(device)
+                action = self.actor(obs)
+                action_dateched = (action.cpu().detach().numpy() + np.random.normal(scale=0.1, size=self.action_dim))\
+                    .clip(self.env.action_space.low, self.env.action_space.high)
+                next_obs, reward, done, _ = self.env.step(action_dateched)
+                self.replay_buffer.add(obs.cpu().numpy(), action_dateched, next_obs, reward, done)
+                obs = next_obs
+                t += 1
+                episode_return += reward
+                if t % self.update_period == 0:
+                    actor_loss, critic_loss = self.update(t)
+            self.logger.add(episode_return, actor_loss, critic_loss)
+            if it % 10 == 0:
+                self.logger.print_last_ten_runs_stat()
+            if it % 100 == 0:
+                self.save()
+
+    def update(self, ep):
+        self.tmp = 0
+        state, action, next_state, reward, done = self.replay_buffer.sample(self.batch_size)
+        state = torch.FloatTensor(state).to(device)
+        action = torch.FloatTensor(action).to(device)
+        reward = torch.FloatTensor(reward).to(device)
+        next_state = torch.FloatTensor(next_state).to(device)
+        done = torch.FloatTensor(done).to(device)
+
+        for it in range(self.update_iterations):
+            # Update critic network
+            q_next_state = self.critic_target(next_state, self.actor_target(next_state))
+            target_q = reward + (self.gamma * (1 - done) * q_next_state).detach()
+            q = self.critic(state, action)
+            critic_loss = nn.MSELoss()(q, target_q)
+            self.critic_optimizer.zero_grad()
+            critic_loss.backward()
+            self.critic_optimizer.step()
+
+            # Update actor network
+            actor_loss = -self.critic(state, self.actor(state)).mean()
+            self.actor_optimizer.zero_grad()
+            actor_loss.backward()
+            self.actor_optimizer.step()        
+
+            # Soft update target networks
+            for target_critic_params, critic_params in zip(self.critic_target.parameters(), self.critic.parameters()):
+                target_critic_params.data.copy_(self.polyak * target_critic_params.data + (1.0 - self.polyak) * critic_params.data)
+
+            for target_actor_params, actor_params in zip(self.actor_target.parameters(), self.actor.parameters()):
+                target_actor_params.data.copy_(self.polyak * target_actor_params.data + (1.0 - self.polyak) * actor_params.data)
+        return actor_loss, critic_loss
+
+    def save(self, it):
+        checkpoint_path = os.path.join(self.path, f"checkpoint_{it}")
+        if not os.path.exists(checkpoint_path):
+            os.makedirs(checkpoint_path)
+        torch.save(self.actor.state_dict(), os.path.join(checkpoint_path, 'actor_weights.pth'))
+        torch.save(self.critic.state_dict(), os.path.join(checkpoint_path, 'critic_weights.pth'))
+
+    def load_from(self, path):
+        if os.path.exists(path):
+            print(f"Loading from {path}")
+            self.actor.load_state_dict(torch.load(os.path.join(path, 'actor_weights.pth')))
+            self.critic.load_state_dict(torch.load(os.path.join(path, 'critic_weights.pth')))
+
+def main():
+    env_cfg = PICK_PLACE_DEFAULT_ENV_CFG
+    env_cfg['pick_only'] = True
+    env_cfg['horizon'] = 250
+    env = PickPlaceWrapper(env_config=env_cfg)
+    agent = DDPGAgent(env, obs_dim=env.obs_dim(), action_dim=env.action_dim(), batch_size=256, update_iterations=2, update_period=2)
+    agent.train(iterations=5000, episode_len=250)
+    agent.rollout()
+
+if __name__ == "__main__":
+    main()

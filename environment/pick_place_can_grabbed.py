@@ -66,17 +66,19 @@ class PickPlaceGrabbedCan(PickPlaceWrapper):
             return super().reset_to(self.predefined_states[rand_idx])
         return super().reset()
 
+    def print_state(self):
+        print(self.gym_env.env._get_observations(force_update=True))
+        print(self.gym_env._flatten_obs(self.gym_env.env._get_observations()))
+
 
 def main():
     # put_states_in_file()
     cfg = PICK_PLACE_DEFAULT_ENV_CFG
-    cfg['has_renderer'] = True
+    # cfg['has_renderer'] = True
     env = PickPlaceGrabbedCan()
-    while True:
-        print(env.reset())
-        env.render()
-        time.sleep(1)
-        break
+    env.reset()
+    env.print_state()
+    
 
 if __name__ == "__main__":
     main()

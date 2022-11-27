@@ -118,6 +118,7 @@ def train_ddpg_original_api():
     env_cfg = PICK_PLACE_DEFAULT_ENV_CFG
     config['env_config'] = env_cfg
     algo = DDPG.DDPGTrainer(config=config)
+    algo.restore("/home/raya/ray_results/DDPG_PickPlaceGrabbedCan_2022-11-21_16-12-59h9rgz9gp/checkpoint_000601")
     for i in range(10000):
         result = algo.train()
         if i % 20 == 0:
@@ -160,10 +161,62 @@ def show(path):
         t = 0
         obs = env.reset()
         ret = 0
-        while not done and t < 300:
+        while not done and t < 200:
             action = algo.compute_single_action(obs)
             obs, reward, done, _ = env.step(action=action)
             ret += reward
             t += 1
             env.render()
         print(f"Episode return: {ret}")
+
+def experiment_ddpg_pick_only():
+    ray.shutdown()
+    ray.init(
+        num_cpus=8,
+        num_gpus=1,
+        include_dashboard=False,
+        ignore_reinit_error=True,
+        log_to_driver=False,
+    )
+    config = DDPG.DEFAULT_CONFIG.copy()
+    config['env'] = PickPlaceWrapper
+    config['framework'] = "torch"
+    config['twin_q'] = True
+    config["num_gpus"] = 1
+    config["num_workers"] = 4
+    config["_fake_gpus"] = False
+    config["horizon"] = 250
+    config["learning_starts"] = 3300
+    config['evaluation_interval'] = 100
+    config["evaluation_duration"] = 10
+    config["evaluation_duration_unit"] = "episodes"
+    config["input"] = {
+        "sampler": 0.3,
+        "/home/raya/uni/ray_test/data/demo-pick-only": 0.7
+    }
+    # config["output"] = "/home/raya/uni/ray_test/data/train-out"
+    # config["output_max_file_size"] = 500000
+    env_cfg = PICK_PLACE_DEFAULT_ENV_CFG
+    env_cfg['pick_only'] = True
+    config['env_config'] = env_cfg
+    algo = DDPG.DDPGTrainer(config=config)
+    algo.restore("/home/raya/ray_results/DDPG_PickPlaceWrapper_2022-11-22_15-41-37r750mf7c/checkpoint_001301")
+    for i in range(10000):
+        result = algo.train()
+        if i % 20 == 0:
+            print(pretty_print(result))
+        if i % 100 == 0:
+            checkpoint = algo.save()
+            print("checkpoint saved at", checkpoint)
+            print()
+    checkpoint = algo.save()
+    print("Last checkpoint saved at", checkpoint)
+
+
+def main():
+    # TODO: Add arguments
+    show("/home/raya/ray_results/DDPG_PickPlaceGrabbedCan_2022-11-22_08-02-50ktxtk5r3/checkpoint_000803")
+
+    
+if __name__ == "__main__":
+    main()

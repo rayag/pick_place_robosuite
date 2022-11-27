@@ -59,12 +59,21 @@ class PickPlaceWrapper(gym.Env):
     def step(self, action):
         obs, reward, _, info = self.gym_env.step(action=action)
         if self.pick_only:
-            _, grasp, _, _ = self.gym_env.env.staged_rewards()
+            reach, grasp, _, _ = self.gym_env.env.staged_rewards()
             if (grasp > 0):
-                reward = 1
+                reward = 10
             else:
-                reward = reward * 2
-        return obs, reward, reward == 1.0, info
+                if reach > 0.03:
+                    reward = reach*2
+                else:
+                    reward = 0
+        return obs, reward, reward == 10.0, info
+
+    def action_dim(self):
+        return self.gym_env.env.action_dim
+
+    def obs_dim(self): 
+        return self.gym_env.obs_dim
 
 class PickPlaceSameState(PickPlaceWrapper):
     def __init__(self, env_config=PICK_PLACE_DEFAULT_ENV_CFG) -> None:
