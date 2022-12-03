@@ -2,7 +2,7 @@ import numpy as np
 import torch
 import h5py
 from environment.pick_place_wrapper import PickPlaceWrapper, PICK_PLACE_DEFAULT_ENV_CFG
-DEMO_PATH = "/home/raya/uni/ray_test/data/demo/low_dim.hdf5"
+DEMO_PATH = "/home/rayageorgieva/uni/masters/pick_place_robosuite/demo/low_dim.hdf5"
 
 def collect_observations():
     '''
@@ -10,26 +10,39 @@ def collect_observations():
     This speeds up the process of getting the data afterwards
     '''
     env_cfg = PICK_PLACE_DEFAULT_ENV_CFG
-    env_cfg['pick_only']
+    env_cfg['pick_only'] = True
     env = PickPlaceWrapper()
     with h5py.File(DEMO_PATH, "r+") as f:
         demos = list(f['data'].keys())
         print(f"Total episodes {len(demos)}")
         sum_steps = 0
         for i in range(len(demos)):
+            print(f"Episode {i} ...")
             ep = demos[i]
             ep_id = int(demos[i][5:])
             states = f["data/{}/states".format(ep)][()]
             acts = f["data/{}/actions".format(ep)][()]
             rs = np.zeros(shape=(states.shape[0]))
-            env.reset_to(states[0])
+            obss = np.zeros(shape=(states.shape[0], env.obs_dim()))
+            next_obss = np.zeros(shape=(states.shape[0], env.obs_dim()))
+            obs = env.reset_to(states[0])
             sum_steps += states.shape[0]
-            for t in range(states.shape[0]):
+            t = 0
+            done = False
+            while t < acts.shape[0] and not done:
                 action = acts[t]
-                _, reward, _, _ = env.step(action)
+                obss[t] = obs
+                obs, reward, done, _ = env.step(action)
+                next_obss[t] = obs
                 rs[t] = reward
-            del f["data/{}/reward_pick_only".format(ep)]
+                t = t + 1
+                if done:
+                    print(env.get_state_dict())
+                    print(obs)
+                    return 
             f.create_dataset("data/{}/reward_pick_only".format(ep), data=rs)
+            f.create_dataset("data/{}/obs_flat".format(ep), data=obss)
+            f.create_dataset("data/{}/next_obs_flat".format(ep), data=obss)
         print(f"Mean steps per episode {sum_steps / len(demos)}")
 
 class SimpleReplayBuffer:
@@ -106,6 +119,11 @@ class SimpleReplayBuffer:
                     self.add(obs_ep[t], actions_ep[t], next_obs_ep[t], rewards_ep[t], done)
                     t += 1
 
+    def get_at(self, pos):
+        return self.obs[pos], self.actions[pos], self.next_obs[pos], self.rewards[pos], self.dones[pos]
+    
+    def __len__(self):
+        return self.size
 
 def main():
     collect_observations()

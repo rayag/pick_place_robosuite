@@ -4,25 +4,27 @@ import os
 class ProgressLogger:
     def __init__(self, path) -> None:
         self.file_path = os.path.join(path, "progress.csv")
-        self.capacity = 2
+        self.capacity = 100
         self.returns = np.zeros(shape=(self.capacity,), dtype=np.float32)
         self.actor_loss = np.zeros(shape=(self.capacity,), dtype=np.float32)
         self.critic_loss = np.zeros(shape=(self.capacity,), dtype=np.float32)
+        self.complete_episodes = np.zeros(shape=(self.capacity,), dtype=np.float32)
         self.it = 0
         with open(self.file_path, 'w+') as f:
             f.write("returns,actor_loss,critic_loss\n")
     
-    def add(self, ep_return, actor_loss, critic_loss):
+    def add(self, ep_return, actor_loss, critic_loss, complete_episodes):
         self.returns[self.it] = ep_return
         self.actor_loss[self.it] = actor_loss
         self.critic_loss[self.it] = critic_loss
+        self.complete_episodes[self.it] = complete_episodes
         self.it += 1
-        if self.it == self.capacity:
+        if self.it == self.capacity: # TODO add complete episodes in progress.csv
             with open(self.file_path, "a") as f:
                 for i in range(self.it):
                     f.write(f"{self.returns[i]},{self.actor_loss[i]},{self.critic_loss[i]}\n")
             self.it = 0
 
-    def print_last_ten_runs_stat(self):
+    def print_last_ten_runs_stat(self, current_iteration):
         if self.it >= 10:
-            print(f"Runs: {self.it} Mean return from last 10 episodes: {np.mean(self.returns[-10:])}")
+            print(f"Runs: {current_iteration} Mean return from last 10 episodes: {np.mean(self.returns[-10:])} Complete episodes: {self.complete_episodes[self.it - 1]}")

@@ -1,8 +1,6 @@
 from environment.pick_place_wrapper import PICK_PLACE_DEFAULT_ENV_CFG, PickPlaceWrapperRs
 from environment.PickPlaceGoal import PickPlaceGoal
-from ray.rllib.utils.replay_buffers import ReplayBuffer, StorageUnit 
-from ray.rllib.policy.sample_batch import SampleBatch 
-from replay_buffer.custom_ray_replay_buffer import CustomRayReplayBuffer, DEMO_PATH
+from replay_buffer.custom_ray_replay_buffer import DEMO_PATH
 from experiments.sac_pick_place_can import *
 from experiments.ddpg_pick_place_can import *
 from vis.visualize import *
@@ -47,15 +45,18 @@ def play_demos(n: int, record_video = False, video_path = "./video"):
             rs = f["data/{}/rewards".format(ep)][()]
             dones = f["data/{}/dones".format(ep)][()]
             env.reset_to(states[0])
-            for ac_i in range(actions.shape[0]):
-                action = actions[ac_i]
+            done = False
+            t = 0
+            while not done and t < actions.shape[0]:
+                action = actions[t]
                 print(action)
                 obs, reward, done, _ = env.step(action)
-                print(f"Reward: {reward} {rs[ac_i]} Done: {done} {dones[ac_i]}")
+                print(f"Reward: {reward} {rs[t]} Done: {done} {dones[t]}")
                 if record_video:
                     video_writer.append_data(np.rot90(np.rot90((obs['frontview_image']))))
                 else:
                     env.render()
+                t = t + 1
             if video_writer:
                 video_writer.close()
 
