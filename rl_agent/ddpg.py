@@ -53,10 +53,7 @@ class DDPGAgent:
         self.env = env
         self.obs_dim = obs_dim
         self.action_dim = action_dim
-        self.replay_buffer = SimpleReplayBuffer(obs_dim=self.obs_dim, action_dim=self.action_dim)
-        self.use_experience = use_experience
-        if use_experience:
-            self.replay_buffer.load_examples_from_file()
+        self.init_replay_buffer(use_experience)
 
         self.actor = ActorNetwork(obs_dim=self.obs_dim, action_dim=self.action_dim).cuda()
         self.actor_target = ActorNetwork(obs_dim=self.obs_dim, action_dim=self.action_dim).cuda()
@@ -72,14 +69,20 @@ class DDPGAgent:
         self.batch_size = batch_size
         self.gamma = 0.99
         self.polyak = 0.995
+
         date_str = datetime.today().strftime('%Y-%m-%d-%H-%M-%S')
-        self.path = os.path.join(BASE_RESULTS_PATH, "DDPG-" + descr + date_str)
+        self.path = os.path.join(BASE_RESULTS_PATH, "DDPG-" + descr + "-" + date_str)
         print(f"Using path {self.path}")
         if not os.path.exists(self.path):
             os.makedirs(self.path)
         self.logger = ProgressLogger(self.path)
-        self.timesteps_before_start_training = 500
-        self.update_period = update_period
+        self.update_period = update_period # TODO: this a training parameter
+
+    def init_replay_buffer(self, use_experience):
+        self.replay_buffer = SimpleReplayBuffer(obs_dim=self.obs_dim, action_dim=self.action_dim)
+        self.use_experience = use_experience
+        if use_experience:
+            self.replay_buffer.load_examples_from_file()
 
     def rollout(self, episodes = 10, steps = 250):
         for ep in range(episodes):
@@ -99,7 +102,7 @@ class DDPGAgent:
                 self.env.render()
             print(f"Episode {ep}: return {ep_return}")
 
-    def train(self, iterations=2000, episode_len=500, exploration_p = 0.1, updates_before_train = 1000):
+    def train(self, iterations=2000, episode_len=500, exploration_p=0.1, updates_before_train=1000, ignore_done=True):
         if self.use_experience:
             print(f"Performing {updates_before_train} updates before train")
             for i in range(updates_before_train):
@@ -123,7 +126,6 @@ class DDPGAgent:
                 else:
                     action = self.actor(obs)
                     action_dateched = action.cpu().detach().numpy().clip(self.env.action_space.low, self.env.action_space.high)
-                
                 next_obs, reward, done, _ = self.env.step(action_dateched)
                 self.replay_buffer.add(obs.cpu().numpy(), action_dateched, next_obs, reward, done)
                 obs = next_obs
@@ -131,19 +133,19 @@ class DDPGAgent:
                 episode_return += reward
                 if t % self.update_period == 0:
                     actor_loss, critic_loss = self.update()
+                if not ignore_done and done:
+                    break
             self.logger.add(episode_return, actor_loss, critic_loss, complete_episodes)
+            print(f"Return {episode_return}")
             if done:
                 complete_episodes += 1
             if it % 10 == 0:
                 self.logger.print_last_ten_runs_stat(current_iteration=it)
-                print(f"Complete episodes {complete_episodes}")
-            if it % 100 == 0:
+            if it % 10 == 0:
                 self.save(it)
         self.save(iterations)
 
     def update(self):
-        self.tmp = 0
-
         for it in range(self.update_iterations):
             state, action, next_state, reward, done = self.replay_buffer.sample(self.batch_size)
             state = torch.FloatTensor(state).to(device)
@@ -192,12 +194,12 @@ def main():
     env_cfg = PICK_PLACE_DEFAULT_ENV_CFG
     env_cfg['pick_only'] = True
     env_cfg['horizon'] = 250
-    # env_cfg['has_renderer'] = True
+    env_cfg['has_renderer'] = True
     env = PickPlaceWrapper(env_config=env_cfg)
     agent = DDPGAgent(env, obs_dim=env.obs_dim(), action_dim=env.action_dim(), batch_size=512, update_iterations=5, update_period=1, use_experience=True)
-    # agent.load_from('/home/rayageorgieva/uni/results/DDPG-2022-12-02-20-59-03/checkpoint_06900')
-    agent.train(iterations=10000, episode_len=200, updates_before_train=100)
-    # agent.rollout(steps=120)
+    agent.load_from('/home/rayageorgieva/uni/results/DDPG-2022-12-01-00-01-01/checkpoint_05000')
+    # agent.train(iterations=10000, episode_len=200, updates_before_train=100)
+    agent.rollout(steps=120)
 
 if __name__ == "__main__":
     main()

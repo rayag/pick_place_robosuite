@@ -27,4 +27,4 @@ class ProgressLogger:
 
     def print_last_ten_runs_stat(self, current_iteration):
         if self.it >= 10:
-            print(f"Runs: {current_iteration} Mean return from last 10 episodes: {np.mean(self.returns[-10:])} Complete episodes: {self.complete_episodes[self.it - 1]}")
+            print(f"Runs: {current_iteration} Mean return from last 10 episodes: {np.mean(self.returns[self.it-10:self.it])} Complete episodes: {self.complete_episodes[self.it - 1]}")

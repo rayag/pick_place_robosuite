@@ -84,6 +84,12 @@ class PickPlaceGoalPick(gym.Env):
         state_goal_copy[-self.goal_dim:] = new_goal
         return state_goal_copy
 
+    def action_dim(self):
+        return self.env_wrapper.gym_env.env.action_dim
+
+    def obs_dim(self): 
+        return self.env_wrapper.gym_env.obs_dim
+
         
 DEMO_PATH = "/home/rayageorgieva/uni/masters/pick_place_robosuite/demo/low_dim.hdf5"
 
@@ -116,11 +122,15 @@ def inspect_observations(visualize = False):
                     print(env.calc_reward_reach(obs))
 
 def main():
-    rb = SimpleReplayBuffer(10, 10, 100)
     env = PickPlaceGoalPick()
-    for i in range(20):
-        rb.add(np.full(shape=(1, 10), fill_value=i), np.full(shape=(1, 10), fill_value=i), np.full(shape=(1, 10), fill_value=i), i, False)
-    print(env.generate_new_goals_from_episode(5, rb, 7))
+    rb = SimpleReplayBuffer(env.obs_dim() + env.goal_dim, env.action_dim(), 100)
+    s_g = env.reset()
+    for i in range(10):
+        action = np.random.uniform(size=env.action_dim(), low=-1, high=1)
+        s_g, reward, done, _ = env.step(action)
+        print(s_g)
+        print(env.calc_reward_reach(s_g))
+    
 
 if __name__ == "__main__":
     main()
