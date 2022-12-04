@@ -11,7 +11,7 @@ class ProgressLogger:
         self.complete_episodes = np.zeros(shape=(self.capacity,), dtype=np.float32)
         self.it = 0
         with open(self.file_path, 'w+') as f:
-            f.write("returns,actor_loss,critic_loss\n")
+            f.write("returns,actor_loss,critic_loss,complete_episodes\n")
     
     def add(self, ep_return, actor_loss, critic_loss, complete_episodes):
         self.returns[self.it] = ep_return
@@ -19,10 +19,10 @@ class ProgressLogger:
         self.critic_loss[self.it] = critic_loss
         self.complete_episodes[self.it] = complete_episodes
         self.it += 1
-        if self.it == self.capacity: # TODO add complete episodes in progress.csv
+        if self.it == self.capacity:
             with open(self.file_path, "a") as f:
                 for i in range(self.it):
-                    f.write(f"{self.returns[i]},{self.actor_loss[i]},{self.critic_loss[i]}\n")
+                    f.write(f"{self.returns[i]},{self.actor_loss[i]},{self.critic_loss[i]},{self.complete_episodes[i]}\n")
             self.it = 0
 
     def print_last_ten_runs_stat(self, current_iteration):

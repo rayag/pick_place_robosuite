@@ -21,6 +21,7 @@ PICK_PLACE_DEFAULT_ENV_CFG = {
     "horizon": 500,
     "controller_configs": ctr_cfg,
     "pick_only": False,
+    "initialization_noise": None,
     "camera_names": ['frontview']
 }
 
@@ -39,7 +40,8 @@ class PickPlaceWrapper(gym.Env):
             ignore_done=env_config['ignore_done'],
             horizon=env_config['horizon'],
             camera_names=env_config['camera_names'],
-            controller_configs=env_config['controller_configs']
+            controller_configs=env_config['controller_configs'],
+            initialization_noise=env_config['initialization_noise']
         ))
         self.observation_space = self.gym_env.observation_space
         self.action_space = self.gym_env.action_space

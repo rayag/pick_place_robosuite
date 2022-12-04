@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-import gym
+import time
 import os
 import numpy as np
 from replay_buffer.simple_replay_buffer import SimpleReplayBuffer
@@ -102,18 +102,19 @@ class DDPGAgent:
                 self.env.render()
             print(f"Episode {ep}: return {ep_return}")
 
-    def train(self, iterations=2000, episode_len=500, exploration_p=0.1, updates_before_train=1000, ignore_done=True):
+    def train(self, iterations=2000, episode_len=500, exploration_p=0.2, updates_before_train=1000, ignore_done=True):
         if self.use_experience:
             print(f"Performing {updates_before_train} updates before train")
             for i in range(updates_before_train):
                 self.update()
 
         print(f"Starting to train...")
+        start_train = time.time()
         complete_episodes = 0
         for it in range(iterations):
+            start_iteration = time.time()
             obs = self.env.reset()
             episode_return = 0
-            # Gather experience
             t = 0
             done = False
             actor_loss, critic_loss = 0, 0
@@ -127,7 +128,7 @@ class DDPGAgent:
                     action = self.actor(obs)
                     action_dateched = action.cpu().detach().numpy().clip(self.env.action_space.low, self.env.action_space.high)
                 next_obs, reward, done, _ = self.env.step(action_dateched)
-                self.replay_buffer.add(obs.cpu().numpy(), action_dateched, next_obs, reward, done)
+                self.replay_buffer.add(obs.cpu().numpy(), action_dateched, next_obs, reward, False if ignore_done else done)
                 obs = next_obs
                 t += 1
                 episode_return += reward
@@ -135,14 +136,16 @@ class DDPGAgent:
                     actor_loss, critic_loss = self.update()
                 if not ignore_done and done:
                     break
+                
             self.logger.add(episode_return, actor_loss, critic_loss, complete_episodes)
-            print(f"Return {episode_return}")
             if done:
                 complete_episodes += 1
             if it % 10 == 0:
                 self.logger.print_last_ten_runs_stat(current_iteration=it)
             if it % 10 == 0:
                 self.save(it)
+            print(f"Iteration took {time.time() - start_iteration}s")
+        print(f"Training took {time.time() - start_train}s")
         self.save(iterations)
 
     def update(self):
@@ -193,13 +196,14 @@ class DDPGAgent:
 def main():
     env_cfg = PICK_PLACE_DEFAULT_ENV_CFG
     env_cfg['pick_only'] = True
-    env_cfg['horizon'] = 250
-    env_cfg['has_renderer'] = True
+    env_cfg['horizon'] = 200
+    # env_cfg['has_renderer'] = True
+    env_cfg['initialization_noise'] = None
     env = PickPlaceWrapper(env_config=env_cfg)
-    agent = DDPGAgent(env, obs_dim=env.obs_dim(), action_dim=env.action_dim(), batch_size=512, update_iterations=5, update_period=1, use_experience=True)
-    agent.load_from('/home/rayageorgieva/uni/results/DDPG-2022-12-01-00-01-01/checkpoint_05000')
-    # agent.train(iterations=10000, episode_len=200, updates_before_train=100)
-    agent.rollout(steps=120)
+    agent = DDPGAgent(env, obs_dim=env.obs_dim(), action_dim=env.action_dim(), batch_size=512, update_iterations=16, update_period=4, use_experience=True)
+    # agent.load_from('/home/rayageorgieva/uni/results/DDPG-2022-12-01-00-01-01/checkpoint_05000')
+    agent.train(iterations=10000, episode_len=200, updates_before_train=1000)
+    # agent.rollout(steps=120)
 
 if __name__ == "__main__":
     main()
