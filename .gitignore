@@ -14,3 +14,4 @@ logger/__pycache__
 demo/
 video/
 *.pth
+.vscode/
