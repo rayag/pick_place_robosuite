@@ -18,11 +18,11 @@ class ActorNetwork(nn.Module):
         super(ActorNetwork, self).__init__()
         self.action_high = action_high
         self.action_low = action_low
-        self.input = nn.Linear(obs_dim, 256).to(device) #TODO: allow custom layer sizes
+        self.input = nn.Linear(obs_dim, 400).to(device) #TODO: allow custom layer sizes
         torch.nn.init.xavier_uniform_(self.input.weight)
-        self.h1 = nn.Linear(256, 256).to(device)
+        self.h1 = nn.Linear(400, 300).to(device)
         torch.nn.init.xavier_uniform_(self.h1.weight)
-        self.output = nn.Linear(256, action_dim).to(device)
+        self.output = nn.Linear(300, action_dim).to(device)
         torch.nn.init.xavier_uniform_(self.output.weight)
 
     def forward(self, obs):
@@ -32,18 +32,18 @@ class ActorNetwork(nn.Module):
         return action
 
 class CriticNetwork(nn.Module):
-    def __init__(self, dim) -> None:
+    def __init__(self, obs_dim, action_dim) -> None:
         super().__init__()
-        self.input = nn.Linear(dim, 256).to(device)
+        self.input = nn.Linear(obs_dim, 400).to(device)
         torch.nn.init.xavier_uniform_(self.input.weight)
-        self.h = nn.Linear(256, 256).to(device)
+        self.h = nn.Linear(400 + action_dim, 300).to(device)
         torch.nn.init.xavier_uniform_(self.h.weight)
-        self.output = nn.Linear(256, 1).to(device)
+        self.output = nn.Linear(300, 1).to(device)
         torch.nn.init.xavier_uniform_(self.output.weight)
 
     def forward(self, s, a):
-        x = F.relu(self.input(torch.cat([s, a], 1)))
-        x = F.relu(self.h(x))
+        x = F.relu(self.input(s))
+        x = F.relu(self.h(torch.cat([x, a], 1)))
         out = self.output(x)
         return out
 
@@ -69,12 +69,12 @@ class DDPGAgent:
         self.actor = ActorNetwork(obs_dim=self.obs_dim, action_dim=self.action_dim)
         self.actor_target = ActorNetwork(obs_dim=self.obs_dim, action_dim=self.action_dim)
         self.actor_target.load_state_dict(self.actor.state_dict())
-        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=1e-4)
+        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=2e-5)
 
-        self.critic = CriticNetwork(dim=self.obs_dim + self.action_dim)
-        self.critic_target = CriticNetwork(dim=self.obs_dim + self.action_dim)
+        self.critic = CriticNetwork(self.obs_dim, self.action_dim)
+        self.critic_target = CriticNetwork(self.obs_dim, self.action_dim)
         self.critic_target.load_state_dict(self.critic.state_dict())
-        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=5e-3)
+        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=1e-4)
 
         self.update_iterations = update_iterations
         self.batch_size = batch_size
@@ -149,22 +149,25 @@ class DDPGAgent:
                 t += 1
                 episode_return += reward
                 if t % self.update_period == 0:
-                    actor_loss, critic_loss = self.update()
+                    actor_loss, critic_loss, value = self.update(ignore_done)
                 if not ignore_done and done:
                     break
                 
-            self.logger.add(episode_return, actor_loss, critic_loss, complete_episodes)
+            self.logger.add(episode_return, actor_loss, critic_loss, complete_episodes, value)
             if done:
                 complete_episodes += 1
             if it % 10 == 0:
                 self.logger.print_last_ten_runs_stat(current_iteration=it)
             if it % 10 == 0:
                 self.save(it)
-            print(f"Iteration took {time.time() - start_iteration}s")
+            print(f"Iteration took {time.time() - start_iteration}s Return: {episode_return} Mean Q: {value}")
         print(f"Training took {time.time() - start_train}s")
         self.save(iterations)
 
-    def update(self):
+    def update(self, ignore_done):
+        actor_losses = torch.Tensor(np.zeros(shape=(self.update_iterations)))
+        critic_losses = torch.Tensor(np.zeros(shape=(self.update_iterations)))
+        values = torch.Tensor(np.zeros(shape=(self.update_iterations)))
         for it in range(self.update_iterations):
             state, action, next_state, reward, done = self.replay_buffer.sample(self.batch_size)
             state = torch.FloatTensor(state).to(device)
@@ -175,7 +178,10 @@ class DDPGAgent:
 
             # Update critic network
             q_next_state = self.critic_target(next_state, self.actor_target(next_state))
-            target_q = reward + (self.gamma * (1 - done) * q_next_state).detach()
+            if ignore_done:
+                target_q = reward + (self.gamma * q_next_state).detach()
+            else:
+                target_q = reward + (self.gamma * (1 - done) * q_next_state).detach()
             q = self.critic(state, action)
             critic_loss = nn.MSELoss()(q, target_q)
             self.critic_optimizer.zero_grad()
@@ -188,13 +194,18 @@ class DDPGAgent:
             actor_loss.backward()
             self.actor_optimizer.step()        
 
+            # Update stats
+            critic_losses[it] = critic_loss.detach()
+            actor_losses[it] = actor_loss.detach()
+            values[it] = q.mean().detach()
+
             # Soft update target networks
             for target_critic_params, critic_params in zip(self.critic_target.parameters(), self.critic.parameters()):
                 target_critic_params.data.copy_(self.polyak * target_critic_params.data + (1.0 - self.polyak) * critic_params.data)
 
             for target_actor_params, actor_params in zip(self.actor_target.parameters(), self.actor.parameters()):
                 target_actor_params.data.copy_(self.polyak * target_actor_params.data + (1.0 - self.polyak) * actor_params.data)
-        return actor_loss, critic_loss
+        return actor_losses.mean().detach(), critic_losses.mean().detach(), values.mean().detach()
 
     def save(self, it):
         checkpoint_path = os.path.join(self.path, f"checkpoint_{it:05}")

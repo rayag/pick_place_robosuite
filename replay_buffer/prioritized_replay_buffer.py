@@ -1,6 +1,7 @@
 import numpy as np
 from replay_buffer.sum_tree import SumTree
 import h5py
+import os
 
 DEMO_PATH = "/home/rayageorgieva/uni/masters/pick_place_robosuite/demo/low_dim.hdf5"
 
@@ -64,8 +65,8 @@ class PrioritizedReplayBuffer:
             self.sum_tree.update_tree(indices[i], priority)
             self.max_priority = max(self.max_priority, priority)
 
-    def load_examples_from_file(self):
-        with h5py.File(DEMO_PATH, "r") as f:
+    def load_examples_from_file(self, demo_dir):
+        with h5py.File(os.path.join(demo_dir, 'low_dim.hdf5'), "r") as f:
             demos = list(f['data'].keys())
             for i in range(len(demos)):
                 ep = demos[i]

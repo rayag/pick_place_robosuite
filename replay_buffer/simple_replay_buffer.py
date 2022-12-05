@@ -111,12 +111,16 @@ class SimpleReplayBuffer:
                 rewards_ep = f["data/{}/reward_pick_only".format(ep)][()]
                 obs_ep = f["data/{}/obs_flat".format(ep)][()]
                 next_obs_ep = f["data/{}/next_obs_flat".format(ep)][()]
-
+                last_t = 0
                 t = 0
                 done = False
-                while not done and t < actions_ep.shape[0]:
-                    done = rewards_ep[t] >= 1
-                    self.add(obs_ep[t], actions_ep[t], next_obs_ep[t], rewards_ep[t], done)
+                while t < actions_ep.shape[0]:
+                    if done:
+                        self.add(obs_ep[last_t], np.zeros_like(actions_ep[0]), next_obs_ep[last_t], rewards_ep[last_t], done)
+                    else:
+                        done = rewards_ep[t] >= 10
+                        self.add(obs_ep[t], actions_ep[t], next_obs_ep[t], rewards_ep[t], done)
+                        last_t = t
                     t += 1
 
     def get_at(self, pos):

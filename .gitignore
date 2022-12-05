@@ -16,3 +16,4 @@ demo/
 video/
 *.pth
 .vscode/
+results/*
