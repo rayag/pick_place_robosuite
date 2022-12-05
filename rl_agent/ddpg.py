@@ -66,13 +66,13 @@ class DDPGAgent:
         self.action_dim = action_dim
         self.init_replay_buffer(use_experience, demo_dir)
 
-        self.actor = ActorNetwork(obs_dim=self.obs_dim, action_dim=self.action_dim).cuda()
-        self.actor_target = ActorNetwork(obs_dim=self.obs_dim, action_dim=self.action_dim).cuda()
+        self.actor = ActorNetwork(obs_dim=self.obs_dim, action_dim=self.action_dim)
+        self.actor_target = ActorNetwork(obs_dim=self.obs_dim, action_dim=self.action_dim)
         self.actor_target.load_state_dict(self.actor.state_dict())
         self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=1e-4)
 
-        self.critic = CriticNetwork(dim=self.obs_dim + self.action_dim).cuda()
-        self.critic_target = CriticNetwork(dim=self.obs_dim + self.action_dim).cuda()
+        self.critic = CriticNetwork(dim=self.obs_dim + self.action_dim)
+        self.critic_target = CriticNetwork(dim=self.obs_dim + self.action_dim)
         self.critic_target.load_state_dict(self.critic.state_dict())
         self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=5e-3)
 
