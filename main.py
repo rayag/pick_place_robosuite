@@ -16,7 +16,7 @@ def main():
         help='Experiment to run')
     parser.add_argument('-chkp', '--checkpoint', default=None,
         help='Checkpoint dir to load model from, should contain *.pth files')
-    parser.add_argument('-a', '--action', choices=['train', 'rollout'], required=True,
+    parser.add_argument('-a', '--action', choices=['train', 'rollout', 'vis'], required=True,
         help='Specifies whether the program will train or rollout agent')
 
     global_cfg = GlobalConfig(parser.parse_args())

@@ -1,8 +1,9 @@
 import pandas as pd
 import matplotlib.pyplot as plt
-import numpy as np
+import os
 
 def visualise_from_custom_progress_file(path):
+    path = os.path.join(path, 'progress.csv')
     df = pd.read_csv(path)
     iterations = df.size
     figure, axis = plt.subplots(2, 2, figsize=(10, 8))
@@ -37,7 +38,7 @@ def visualise_from_custom_progress_file(path):
 
 def main():
     # visulize_from_progress_csv("/home/raya/ray_results/DDPG_PickPlaceGrabbedCan_2022-11-21_23-40-413uklke4y/progress.csv")
-    visualise_from_custom_progress_file("/home/rayageorgieva/uni/results/DDPG--2022-12-05-21-29-41/progress.csv")
+    visualise_from_custom_progress_file("/home/rayageorgieva/uni/results/DDPG--2022-12-05-23-47-41/")
 
 if __name__ == "__main__":
     main()
