@@ -82,7 +82,7 @@ class DDPGAgent:
         self.polyak = 0.995
 
         date_str = datetime.today().strftime('%Y-%m-%d-%H-%M-%S')
-        self.path = os.path.join(BASE_RESULTS_PATH, "DDPG-" + descr + "-" + date_str)
+        self.path = os.path.join(results_dir, "DDPG-" + descr + "-" + date_str)
         print(f"Using path {self.path}")
         if not os.path.exists(self.path):
             os.makedirs(self.path)
