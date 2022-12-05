@@ -1,5 +1,5 @@
 import numpy as np
-import torch
+import os
 import h5py
 from environment.pick_place_wrapper import PickPlaceWrapper, PICK_PLACE_DEFAULT_ENV_CFG
 DEMO_PATH = "/home/rayageorgieva/uni/masters/pick_place_robosuite/demo/low_dim.hdf5"
@@ -101,8 +101,8 @@ class SimpleReplayBuffer:
         indices = np.random.choice(self.size, batch_size)
         return self.obs[indices], self.actions[indices], self.next_obs[indices], self.rewards[indices], self.dones[indices]
 
-    def load_examples_from_file(self):
-        with h5py.File(DEMO_PATH, "r") as f:
+    def load_examples_from_file(self, demo_dir):
+        with h5py.File(os.path.join(demo_dir, 'low_dim.hdf5'), "r") as f:
             demos = list(f['data'].keys())
             for i in range(len(demos)):
                 ep = demos[i]
@@ -121,12 +121,20 @@ class SimpleReplayBuffer:
 
     def get_at(self, pos):
         return self.obs[pos], self.actions[pos], self.next_obs[pos], self.rewards[pos], self.dones[pos]
+
+    def get_last_episode_transitions(self, episode_length):
+        if episode_length < self.size:
+            return self.obs[-episode_length:], self.actions[-episode_length:], self.next_obs[-episode_length:], self.rewards[-episode_length:], self.dones[-episode_length:]
     
     def __len__(self):
         return self.size
 
 def main():
-    collect_observations()
+    rb = SimpleReplayBuffer(1, 1, 10)
+    x = np.array([1])
+    for i in range(4):
+        rb.add(x,x,x,x,False)
+        x[0] = i
 
 if __name__ == "__main__":
     main()

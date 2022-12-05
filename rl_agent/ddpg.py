@@ -64,7 +64,7 @@ class DDPGAgent:
         self.env = env
         self.obs_dim = obs_dim
         self.action_dim = action_dim
-        self.init_replay_buffer(use_experience)
+        self.init_replay_buffer(use_experience, demo_dir)
 
         self.actor = ActorNetwork(obs_dim=self.obs_dim, action_dim=self.action_dim).cuda()
         self.actor_target = ActorNetwork(obs_dim=self.obs_dim, action_dim=self.action_dim).cuda()
@@ -94,11 +94,11 @@ class DDPGAgent:
         else:
             print("No checkpoint dir specified")
 
-    def init_replay_buffer(self, use_experience):
+    def init_replay_buffer(self, use_experience, demo_dir):
         self.replay_buffer = SimpleReplayBuffer(obs_dim=self.obs_dim, action_dim=self.action_dim)
         self.use_experience = use_experience
         if use_experience:
-            self.replay_buffer.load_examples_from_file()
+            self.replay_buffer.load_examples_from_file(demo_dir)
 
     def rollout(self, episodes = 10, steps = 250):
         for ep in range(episodes):
