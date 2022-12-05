@@ -205,6 +205,6 @@ class DDPGAgent:
 
     def _load_from(self, path):
         if os.path.exists(path):
-            print(f"Loading from {path}")
-            self.actor.load_state_dict(torch.load(os.path.join(path, 'actor_weights.pth')))
-            self.critic.load_state_dict(torch.load(os.path.join(path, 'critic_weights.pth')))
+            print(f"Loading from {path} device {device}")
+            self.actor.load_state_dict(torch.load(os.path.join(path, 'actor_weights.pth'), map_location=device))
+            self.critic.load_state_dict(torch.load(os.path.join(path, 'critic_weights.pth'), map_location=device))
