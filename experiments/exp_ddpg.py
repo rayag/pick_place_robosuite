@@ -23,7 +23,8 @@ def train(cfg: GlobalConfig):
         update_period=4, 
         use_experience=True,
         results_dir=cfg.results_dir,
-        demo_dir=cfg.demo_dir)
+        demo_dir=cfg.demo_dir,
+        checkpoint_dir=cfg.checkpoint_dir)
     agent.train(iterations=10000, episode_len=200, updates_before_train=1000) # TODO: add better experiment description
 
 def rollout(cfg: GlobalConfig):
