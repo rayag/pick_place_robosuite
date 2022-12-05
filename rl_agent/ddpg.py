@@ -7,7 +7,6 @@ import os
 import numpy as np
 from replay_buffer.simple_replay_buffer import SimpleReplayBuffer
 from datetime import datetime
-from environment.pick_place_wrapper import PickPlaceWrapper, PICK_PLACE_DEFAULT_ENV_CFG
 from logger.logger import ProgressLogger
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -49,7 +48,19 @@ class CriticNetwork(nn.Module):
         return out
 
 class DDPGAgent:
-    def __init__(self, env, obs_dim, action_dim, update_iterations = 2, batch_size = 256, use_experience = True, update_period = 1, descr = "") -> None:
+    def __init__(self, 
+        env, 
+        obs_dim, 
+        action_dim, 
+        update_iterations = 2, 
+        batch_size = 256, 
+        use_experience = True, 
+        update_period = 1, 
+        descr = "",
+        results_dir = BASE_RESULTS_PATH,
+        demo_dir = './demo',
+        checkpoint_dir = None) -> None:
+
         self.env = env
         self.obs_dim = obs_dim
         self.action_dim = action_dim
@@ -77,6 +88,11 @@ class DDPGAgent:
             os.makedirs(self.path)
         self.logger = ProgressLogger(self.path)
         self.update_period = update_period # TODO: this a training parameter
+
+        if checkpoint_dir:
+            self._load_from(checkpoint_dir)
+        else:
+            print("No checkpoint dir specified")
 
     def init_replay_buffer(self, use_experience):
         self.replay_buffer = SimpleReplayBuffer(obs_dim=self.obs_dim, action_dim=self.action_dim)
@@ -187,23 +203,8 @@ class DDPGAgent:
         torch.save(self.actor.state_dict(), os.path.join(checkpoint_path, 'actor_weights.pth'))
         torch.save(self.critic.state_dict(), os.path.join(checkpoint_path, 'critic_weights.pth'))
 
-    def load_from(self, path):
+    def _load_from(self, path):
         if os.path.exists(path):
             print(f"Loading from {path}")
             self.actor.load_state_dict(torch.load(os.path.join(path, 'actor_weights.pth')))
             self.critic.load_state_dict(torch.load(os.path.join(path, 'critic_weights.pth')))
-
-def main():
-    env_cfg = PICK_PLACE_DEFAULT_ENV_CFG
-    env_cfg['pick_only'] = True
-    env_cfg['horizon'] = 200
-    # env_cfg['has_renderer'] = True
-    env_cfg['initialization_noise'] = None
-    env = PickPlaceWrapper(env_config=env_cfg)
-    agent = DDPGAgent(env, obs_dim=env.obs_dim(), action_dim=env.action_dim(), batch_size=512, update_iterations=16, update_period=4, use_experience=True)
-    # agent.load_from('/home/rayageorgieva/uni/results/DDPG-2022-12-01-00-01-01/checkpoint_05000')
-    agent.train(iterations=10000, episode_len=200, updates_before_train=1000)
-    # agent.rollout(steps=120)
-
-if __name__ == "__main__":
-    main()

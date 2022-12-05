@@ -58,10 +58,11 @@ def main():
     env_cfg = PICK_PLACE_DEFAULT_ENV_CFG
     env_cfg['pick_only'] = True
     env_cfg['horizon'] = 200
+    env_cfg['initialization_noise'] = None
     # env_cfg['has_renderer'] = True
     env = PickPlaceWrapper(env_config=env_cfg)
-    agent = DDPGPERAgent(env,  env.obs_dim(), env.action_dim(), use_experience=True, batch_size=512, descr="PER")
-    agent.train(iterations=100000, episode_len=200, ignore_done=False)
+    agent = DDPGPERAgent(env,  env.obs_dim(), env.action_dim(), update_iterations=20, update_period=10, use_experience=True, batch_size=512, descr="PER")
+    agent.train(iterations=100000, episode_len=200, exploration_p=0.2)
     # agent.load_from("/home/rayageorgieva/uni/results/DDPG-2022-12-03-20-40-18/checkpoint_00100")
     # agent.rollout(10, steps=200)
 

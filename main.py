@@ -1,70 +1,26 @@
-from environment.pick_place_wrapper import PICK_PLACE_DEFAULT_ENV_CFG, PickPlaceWrapperRs
-from environment.PickPlaceGoal import PickPlaceGoal
-from replay_buffer.custom_ray_replay_buffer import DEMO_PATH
-from experiments.sac_pick_place_can import *
-from experiments.ddpg_pick_place_can import *
-from vis.visualize import *
-
-import h5py
-import robosuite as suite
-import imageio
-import matplotlib.pyplot as plt
-import numpy as np
-
-def play_demos(n: int, record_video = False, video_path = "./video"):
-    """
-    n: number of demos to play
-    """
-    ctr_cfg = suite.load_controller_config(default_controller="OSC_POSE")
-    env_cfg = PICK_PLACE_DEFAULT_ENV_CFG
-    env_cfg['controller_configs'] = ctr_cfg
-    if record_video:
-        env_cfg['has_offscreen_renderer'] = True
-        env_cfg['use_camera_obs'] = True
-        env_cfg['camera_names'] = ['frontview']
-    else:
-        env_cfg['has_renderer'] = True
-
-    env = PickPlaceGoal(env_config=env_cfg)
-    actions = list()
-    video_writer = None
-    input("Press Enter to continue...")
-    with h5py.File(DEMO_PATH, "r") as f:
-        demos = list(f['data'].keys())
-        indices = np.random.randint(0, len(demos), size=n) # random demos indices
-        print(f"Episodes: {len(demos)}")
-        for i in range(n):
-            ep = demos[indices[i]]
-            print(f"Playing {ep}..")
-            if record_video:
-                fv = open(f"{video_path}/{ep}.mp4", 'w')
-                fv.close()
-                video_writer = imageio.get_writer(f"{video_path}/{ep}.mp4", fps=20)
-            states = f["data/{}/states".format(ep)][()]
-            actions = f["data/{}/actions".format(ep)][()]
-            rs = f["data/{}/rewards".format(ep)][()]
-            dones = f["data/{}/dones".format(ep)][()]
-            env.reset_to(states[0])
-            done = False
-            t = 0
-            while not done and t < actions.shape[0]:
-                action = actions[t]
-                print(action)
-                obs, reward, done, _ = env.step(action)
-                print(f"Reward: {reward} {rs[t]} Done: {done} {dones[t]}")
-                if record_video:
-                    video_writer.append_data(np.rot90(np.rot90((obs['frontview_image']))))
-                else:
-                    env.render()
-                t = t + 1
-            if video_writer:
-                video_writer.close()
+import argparse
+from config.global_config import GlobalConfig
+from config.config_runner import ConfigRunner
 
 def main():
-    # TODO: Add arguments
-    # show_checkpont("/home/raya/ray_results/SAC/SAC_PickPlaceCan-Panda_e4405_00000_0_2022-11-07_00-03-49/checkpoint_010000/checkpoint-10000")
-    play_demos(5)
+    parser = argparse.ArgumentParser(
+        prog = 'PickPlaceCanRobosuiteWithRl',
+        description='Part of the masters thesis of Raya Georgieva'
+    )
 
+    parser.add_argument('-r', '--results-dir', default='./results', 
+        help='Directory which will hold the results of the experiments')
+    parser.add_argument('-dm', '--demo-dir', default='./demo',
+        help='Directory holding data from demos')
+    parser.add_argument('-e', '--experiment', choices=['ddpg-pick', 'ddpg-per-pick'],
+        help='Experiment to run')
+    parser.add_argument('-chkp', '--checkpoint', default=None,
+        help='Checkpoint dir to load model from, should contain *.pth files')
+    parser.add_argument('-a', '--action', choices=['train', 'rollout'], required=True,
+        help='Specifies whether the program will train or rollout agent')
+
+    global_cfg = GlobalConfig(parser.parse_args())
+    ConfigRunner.run(global_cfg)
     
 if __name__ == "__main__":
     main()

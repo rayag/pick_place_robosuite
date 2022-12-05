@@ -11,6 +11,7 @@ rl_agent/__pycache__/
 replay_buffer/__pycache__/
 vis/__pycache__/
 logger/__pycache__
+config/__pychache__
 demo/
 video/
 *.pth
