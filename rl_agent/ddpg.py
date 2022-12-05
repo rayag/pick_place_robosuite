@@ -122,7 +122,7 @@ class DDPGAgent:
         if self.use_experience:
             print(f"Performing {updates_before_train} updates before train")
             for i in range(updates_before_train):
-                self.update()
+                self.update(ignore_done)
 
         print(f"Starting to train...")
         start_train = time.time()
