@@ -10,11 +10,12 @@ import numpy as np
 import datetime
 import os
 import argparse
+import time
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class DDPGHERAgent(DDPGAgent):
-    def __init__(self, env, obs_dim, action_dim, goal_dim, update_iterations=1, batch_size=256, use_experience=True, descr='', results_dir='./results') -> None:
+    def __init__(self, env, obs_dim, action_dim, goal_dim, update_iterations=2, batch_size=256, use_experience=True, descr='', results_dir='./results') -> None:
         self.env = env
         self.obs_dim = obs_dim
         self.action_dim = action_dim
@@ -48,9 +49,10 @@ class DDPGHERAgent(DDPGAgent):
         self.replay_buffer = SimpleReplayBuffer(obs_dim=self.obs_dim + self.goal_dim, action_dim=self.action_dim)
 
     def train(self, epochs=200, episodes_ep=1000, episode_len=500, exploration_eps=0.1, future_goals = 4):
-
+        complete_episodes = 0
         for e in range(epochs):
             success_count = 0
+            start_epoch = time.time()
             for ep in range(episodes_ep):
                 obs, goal = self.env.reset()
                 episode_return = 0
@@ -74,6 +76,7 @@ class DDPGHERAgent(DDPGAgent):
                     episode_return += reward
                     if done:
                         success_count += 1
+                        complete_episodes += 1
                 
                 ep_obs_g, ep_actions, ep_next_obs_g, _, _ = self.replay_buffer.get_last_episode_transitions(t)
                 for t1 in range(t):
@@ -83,9 +86,10 @@ class DDPGHERAgent(DDPGAgent):
                         new_next_obs_goal = self.env.replace_goal(np.copy(ep_next_obs_g[t1]), g)
                         new_reward = self.env.calc_reward_reach(new_next_obs_goal, g)
                         self.replay_buffer.add(new_obs_goal, ep_actions[t1], new_next_obs_goal, new_reward, new_reward == 1.0)
-            print(f"Success rate: {success_count * 100.0 / episodes_ep}%")
-
-            actor_loss, critic_loss, values = self.update(False)
+                actor_loss, critic_loss, value = self.update(False)
+                self.logger.add(episode_return, actor_loss, critic_loss, complete_episodes, value)
+            end_epoch = time.time()
+            print(f"Epoch: {e} Success rate: {success_count * 100.0 / episodes_ep}% Duration: {end_epoch-start_epoch}s")
 
 def main():
     # TODO: remove
