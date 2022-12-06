@@ -25,7 +25,7 @@ def train(cfg: GlobalConfig):
         results_dir=cfg.results_dir,
         demo_dir=cfg.demo_dir,
         checkpoint_dir=cfg.checkpoint_dir)
-    agent.train(iterations=10000, episode_len=200, updates_before_train=0) # TODO: add better experiment description
+    agent.train(iterations=10000, episode_len=200, updates_before_train=100) # TODO: add better experiment description
 
 def rollout(cfg: GlobalConfig):
     env_cfg = PICK_PLACE_DEFAULT_ENV_CFG
@@ -59,7 +59,7 @@ def main():
         update_iterations=16, 
         update_period=4, 
         use_experience=True)
-    agent.train(iterations=10000, episode_len=200, updates_before_train=1000) # TODO: add better experiment description
+    agent.train(iterations=10000, episode_len=200, updates_before_train=100) # TODO: add better experiment description
 
 if __name__ == '__main__':
     main()
