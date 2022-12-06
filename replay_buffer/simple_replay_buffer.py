@@ -36,10 +36,7 @@ def collect_observations():
                 next_obss[t] = obs
                 rs[t] = reward
                 t = t + 1
-                if done:
-                    print(env.get_state_dict())
-                    print(obs)
-                    return 
+            del f["data/{}/reward_pick_only".format(ep)]
             f.create_dataset("data/{}/reward_pick_only".format(ep), data=rs)
             f.create_dataset("data/{}/obs_flat".format(ep), data=obss)
             f.create_dataset("data/{}/next_obs_flat".format(ep), data=obss)
@@ -138,11 +135,7 @@ class SimpleReplayBuffer:
         return self.size
 
 def main():
-    rb = SimpleReplayBuffer(1, 1, 10)
-    x = np.array([1])
-    for i in range(4):
-        rb.add(x,x,x,x,False)
-        x[0] = i
+    collect_observations()
 
 if __name__ == "__main__":
     main()
