@@ -14,7 +14,7 @@ import argparse
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class DDPGHERAgent(DDPGAgent):
-    def __init__(self, env, obs_dim, action_dim, goal_dim, update_iterations=2, batch_size=256, use_experience=True, descr='', results_dir='./results') -> None:
+    def __init__(self, env, obs_dim, action_dim, goal_dim, update_iterations=1, batch_size=256, use_experience=True, descr='', results_dir='./results') -> None:
         self.env = env
         self.obs_dim = obs_dim
         self.action_dim = action_dim
@@ -75,17 +75,17 @@ class DDPGHERAgent(DDPGAgent):
                     if done:
                         success_count += 1
                 
-                ep_obs_g, ep_actions, ep_next_obs_g, _, _ = self.replay_buffer.get_last_episode_transitions(episode_len)
-                for t in range(episode_len):
-                    G = self.env.generate_new_goals_from_episode(future_goals, ep_obs_g, ep_next_obs_g, t)
+                ep_obs_g, ep_actions, ep_next_obs_g, _, _ = self.replay_buffer.get_last_episode_transitions(t)
+                for t1 in range(t):
+                    G = self.env.generate_new_goals_from_episode(future_goals, ep_obs_g, ep_next_obs_g, t1)
                     for g in G:
-                        new_obs_goal = self.env.replace_goal(np.copy(ep_obs_g[t]), g)
-                        new_next_obs_goal = self.env.replace_goal(np.copy(ep_next_obs_g[t]), g)
+                        new_obs_goal = self.env.replace_goal(np.copy(ep_obs_g[t1]), g)
+                        new_next_obs_goal = self.env.replace_goal(np.copy(ep_next_obs_g[t1]), g)
                         new_reward = self.env.calc_reward_reach(new_next_obs_goal, g)
-                        self.replay_buffer.add(new_obs_goal, ep_actions[t], new_next_obs_goal, new_reward, new_reward == 1.0)
+                        self.replay_buffer.add(new_obs_goal, ep_actions[t1], new_next_obs_goal, new_reward, new_reward == 1.0)
             print(f"Success rate: {success_count * 100.0 / episodes_ep}%")
 
-            _,_,_ = self.update(False)
+            actor_loss, critic_loss, values = self.update(False)
 
 def main():
     # TODO: remove
@@ -99,7 +99,7 @@ def main():
     env_cfg['horizon'] = 200
     # env_cfg['has_renderer'] = True
     env = PickPlaceGoalPick(env_config=env_cfg)
-    agent = DDPGHERAgent(env=env, obs_dim=env.obs_dim, action_dim=env.action_dim, goal_dim=env.goal_dim, use_experience=False, results_dir=args.results_dir)
+    agent = DDPGHERAgent(env=env, obs_dim=env.obs_dim, action_dim=env.action_dim, goal_dim=env.goal_dim, use_experience=False, results_dir=args.results_dir, descr='HER')
     agent.train(epochs=1000, episodes_ep=10)
 
 if __name__ == '__main__':
