@@ -15,7 +15,7 @@ import time
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class DDPGHERAgent(DDPGAgent):
-    def __init__(self, env, obs_dim, action_dim, goal_dim, update_iterations=2, batch_size=256, use_experience=True, descr='', results_dir='./results') -> None:
+    def __init__(self, env, obs_dim, action_dim, goal_dim, update_iterations=2, batch_size=256, actor_lr = 1e-3, critic_lr = 1e-3, descr='', results_dir='./results') -> None:
         self.env = env
         self.obs_dim = obs_dim
         self.action_dim = action_dim
@@ -96,15 +96,18 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('-r', '--results_dir', default='./results', 
         help='Directory which will hold the results of the experiments')
+    parser.add_argument('-alr', '--actor-lr', default=1e-3)
+    parser.add_argument('-clr', '--critic-lr', default=1e-3)
     args = parser.parse_args()
+    print(f"Actor alpha {args.actor_lr}, Critic alpha {args.critic_lr}")
 
     env_cfg = PICK_PLACE_DEFAULT_ENV_CFG
     env_cfg['pick_only'] = True
     env_cfg['horizon'] = 200
     # env_cfg['has_renderer'] = True
     env = PickPlaceGoalPick(env_config=env_cfg)
-    agent = DDPGHERAgent(env=env, obs_dim=env.obs_dim, action_dim=env.action_dim, goal_dim=env.goal_dim, use_experience=False, results_dir=args.results_dir, descr='HER')
-    agent.train(epochs=1000, episodes_ep=100)
+    agent = DDPGHERAgent(env=env, obs_dim=env.obs_dim, action_dim=env.action_dim, goal_dim=env.goal_dim, actor_lr=args.actor_lr, critic_lr=args.critic_lr, results_dir=args.results_dir, descr='HER')
+    # agent.train(epochs=1000, episodes_ep=100)
 
 if __name__ == '__main__':
     main()
