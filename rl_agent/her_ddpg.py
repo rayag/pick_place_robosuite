@@ -26,12 +26,12 @@ class DDPGHERAgent(DDPGAgent):
         self.actor = ActorNetwork(obs_dim=self.obs_dim + self.goal_dim, action_dim=self.action_dim)
         self.actor_target = ActorNetwork(obs_dim=self.obs_dim + self.goal_dim, action_dim=self.action_dim)
         self.actor_target.load_state_dict(self.actor.state_dict())
-        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=5e-4)
+        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=1e-3)
 
         self.critic = CriticNetwork(self.obs_dim + self.goal_dim, self.action_dim)
         self.critic_target = CriticNetwork(self.obs_dim + self.goal_dim, self.action_dim)
         self.critic_target.load_state_dict(self.critic.state_dict())
-        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=1e-3)
+        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=1e-2)
 
         self.update_iterations = update_iterations
         self.batch_size = batch_size
