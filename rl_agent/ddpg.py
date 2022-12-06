@@ -81,12 +81,12 @@ class DDPGAgent:
         self.actor = ActorNetwork(obs_dim=self.obs_dim, action_dim=self.action_dim)
         self.actor_target = ActorNetwork(obs_dim=self.obs_dim, action_dim=self.action_dim)
         self.actor_target.load_state_dict(self.actor.state_dict())
-        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=2e-5)
+        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=5e-5)
 
         self.critic = CriticNetwork(self.obs_dim, self.action_dim)
         self.critic_target = CriticNetwork(self.obs_dim, self.action_dim)
         self.critic_target.load_state_dict(self.critic.state_dict())
-        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=2e-4)
+        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=5e-4)
 
         self.update_iterations = update_iterations
         self.batch_size = batch_size
