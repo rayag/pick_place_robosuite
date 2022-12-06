@@ -18,32 +18,44 @@ class ActorNetwork(nn.Module):
         super(ActorNetwork, self).__init__()
         self.action_high = action_high
         self.action_low = action_low
-        self.input = nn.Linear(obs_dim, 400).to(device) #TODO: allow custom layer sizes
+        self.input = nn.Linear(obs_dim, 256).to(device) #TODO: allow custom layer sizes
         torch.nn.init.xavier_uniform_(self.input.weight)
-        self.h1 = nn.Linear(400, 300).to(device)
+
+        self.h1 = nn.Linear(256, 256).to(device)
         torch.nn.init.xavier_uniform_(self.h1.weight)
-        self.output = nn.Linear(300, action_dim).to(device)
+
+        self.h2 = nn.Linear(256, 256).to(device)
+        torch.nn.init.xavier_uniform_(self.h2.weight)
+
+        self.output = nn.Linear(256, action_dim).to(device)
         torch.nn.init.xavier_uniform_(self.output.weight)
 
     def forward(self, obs):
         x = F.relu(self.input(obs))
         x = F.relu(self.h1(x))
+        x = F.relu(self.h2(x))
         action = torch.mul(torch.tanh(self.output(x)), self.action_high)
         return action
 
 class CriticNetwork(nn.Module):
     def __init__(self, obs_dim, action_dim) -> None:
         super().__init__()
-        self.input = nn.Linear(obs_dim, 400).to(device)
+        self.input = nn.Linear(obs_dim, 256).to(device)
         torch.nn.init.xavier_uniform_(self.input.weight)
-        self.h = nn.Linear(400 + action_dim, 300).to(device)
-        torch.nn.init.xavier_uniform_(self.h.weight)
-        self.output = nn.Linear(300, 1).to(device)
+
+        self.h1 = nn.Linear(256 + action_dim, 256).to(device)
+        torch.nn.init.xavier_uniform_(self.h1.weight)
+
+        self.h2 = nn.Linear(256, 256).to(device)
+        torch.nn.init.xavier_uniform_(self.h2.weight)
+
+        self.output = nn.Linear(256, 1).to(device)
         torch.nn.init.xavier_uniform_(self.output.weight)
 
     def forward(self, s, a):
         x = F.relu(self.input(s))
-        x = F.relu(self.h(torch.cat([x, a], 1)))
+        x = F.relu(self.h1(torch.cat([x, a], 1)))
+        x = F.relu(self.h2(x))
         out = self.output(x)
         return out
 
@@ -69,12 +81,12 @@ class DDPGAgent:
         self.actor = ActorNetwork(obs_dim=self.obs_dim, action_dim=self.action_dim)
         self.actor_target = ActorNetwork(obs_dim=self.obs_dim, action_dim=self.action_dim)
         self.actor_target.load_state_dict(self.actor.state_dict())
-        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=2e-5)
+        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=5e-5)
 
         self.critic = CriticNetwork(self.obs_dim, self.action_dim)
         self.critic_target = CriticNetwork(self.obs_dim, self.action_dim)
         self.critic_target.load_state_dict(self.critic.state_dict())
-        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=1e-4)
+        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=5e-4)
 
         self.update_iterations = update_iterations
         self.batch_size = batch_size
