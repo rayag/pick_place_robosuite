@@ -127,8 +127,12 @@ class SimpleReplayBuffer:
         return self.obs[pos], self.actions[pos], self.next_obs[pos], self.rewards[pos], self.dones[pos]
 
     def get_last_episode_transitions(self, episode_length):
-        if episode_length < self.size:
-            return self.obs[-episode_length:], self.actions[-episode_length:], self.next_obs[-episode_length:], self.rewards[-episode_length:], self.dones[-episode_length:]
+        if episode_length <= self.size:
+            return self.obs[self.it-episode_length:self.it],  \
+                self.actions[self.it-episode_length:self.it], \
+                self.next_obs[self.it-episode_length:self.it],\
+                self.rewards[self.it-episode_length:self.it], \
+                self.dones[self.it-episode_length:self.it]    
     
     def __len__(self):
         return self.size

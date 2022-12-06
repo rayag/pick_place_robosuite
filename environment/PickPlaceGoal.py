@@ -4,6 +4,7 @@ from replay_buffer.simple_replay_buffer import SimpleReplayBuffer
 import gym
 import h5py
 import numpy as np
+import time
 
 class PickPlaceGoalPick(gym.Env):
     def __init__(self, env_config=PICK_PLACE_DEFAULT_ENV_CFG) -> None:
@@ -17,17 +18,17 @@ class PickPlaceGoalPick(gym.Env):
 
     def step(self, action):
         obs, _, done, info = self.env_wrapper.step(action)
-        return np.concatenate((obs, self.goal)), 0, done, info
+        return obs, self.calc_reward_reach(obs, self.goal), done, info, self.goal,
 
     def reset(self):
         obs = self.env_wrapper.reset()
         self.goal = self.generate_goal_pick()
-        return np.concatenate((obs, self.goal))
+        return obs, self.goal
 
     def reset_to(self, state):
         obs = self.env_wrapper.reset_to(state=state)
         self.goal = self.generate_goal_pick()
-        return np.concatenate((obs, self.goal))
+        return obs, self.goal
     
     def generate_goal_can(self):
         CAN_IDX = 3 # TODO: make this work for all objects
@@ -58,35 +59,44 @@ class PickPlaceGoalPick(gym.Env):
             and np.abs(obj_pos[2] - goal[2]) < 0.1
         return 1.0 if goal_reached else 0.0
 
-    def calc_reward_reach(self, state_goal):
-        goal = state_goal[-self.goal_dim:]
-        eef_pos = state_goal[35:38]
-        goal_reached = np.abs(eef_pos[0] - goal[0]) < 0.02 \
-            and np.abs(eef_pos[1] - goal[1]) < 0.02        \
-            and np.abs(eef_pos[2] - goal[2]) < 0.02
+    def calc_reward_reach(self, obs, desired_goal):
+        eef_pos = obs[35:38]
+        goal_reached = np.abs(eef_pos[0] - desired_goal[0]) < 0.02 \
+            and np.abs(eef_pos[1] - desired_goal[1]) < 0.02        \
+            and np.abs(eef_pos[2] - desired_goal[2]) < 0.02
         return 1.0 if goal_reached else 0.0
 
     def render(self):
         self.env_wrapper.render()
 
-    def generate_new_goals_from_episode(self, k, episode_replay_buffer, step):
+    def extract_goal_from_obs_g(self, obs_g):
+        assert obs_g.shape[0] == (self.obs_dim + self.goal_dim)
+        return obs_g[-self.goal_dim:]
+
+    def extract_eef_pos_from_obs_g(self, obs_g):
+        return obs_g[35:38]
+    
+    def replace_goal(self, obs_g, new_goal):
+        obs_g[-self.goal_dim:] = new_goal
+        return obs_g
+
+    def generate_new_goals_from_episode(self, k, episode_obs_g, episode_obs_next_g, ep_t):
         goals = np.zeros(shape=(k+1, self.goal_dim))
-        # one of the goals should be the last goal
-        obs, _, _, _, _ = episode_replay_buffer.get_at(step)
-        goals[0] = obs[-self.goal_dim:]
-        future_indices = np.random.randint(low=step+1, high=len(episode_replay_buffer), size=k)
-        obs, _, _, _, _ = episode_replay_buffer.get_at(future_indices)
-        goals[1:] = obs[:,-self.goal_dim:]
+        # one of the goals should be the achieved state from current step, i.e the pos of the EEF
+        obs_goal = episode_obs_next_g[ep_t]
+        goals[0] = self.extract_eef_pos_from_obs_g(obs_goal)
+        if ep_t < (episode_obs_g.shape[0]-1):
+            # future strategy
+            future_indices = np.random.randint(low=ep_t+1, high=episode_obs_g.shape[0], size=k)
+            obs_goal = episode_obs_g[future_indices]
+            goals[1:] = obs_goal[:,35:38] # TODO use function
         return goals
 
-    def generate_state_with_goal(self, state_goal, new_goal):
-        state_goal_copy = np.copy(state_goal)
-        state_goal_copy[-self.goal_dim:] = new_goal
-        return state_goal_copy
-
+    @property
     def action_dim(self):
         return self.env_wrapper.gym_env.env.action_dim
 
+    @property
     def obs_dim(self): 
         return self.env_wrapper.gym_env.obs_dim
 
@@ -108,28 +118,33 @@ def inspect_observations(visualize = False):
             ep_id = int(demos[i][5:])
             states = f["data/{}/states".format(ep)][()]
             acts = f["data/{}/actions".format(ep)][()]
-            obs = env.reset_to(states[0])
+            obs, goal = env.reset_to(states[0])
             sum_steps += states.shape[0]
             t = 0
             done = False
-            while t < acts.shape[0] and not done:
-                action = acts[t]
-                obs, reward, done, _ = env.step(action)
+            while t < acts.shape[0]:
+                if done:
+                    action = np.zeros(shape=(acts.shape[1]))
+                else:
+                    action = acts[t]
+                obs, reward, done, _, _ = env.step(action)
                 t = t + 1
                 if visualize:
                     env.render()
                 if done or t == acts.shape[0]-1:
-                    print(env.calc_reward_reach(obs))
+                    print(env.calc_reward_reach(obs, goal))
 
 def main():
-    env = PickPlaceGoalPick()
-    rb = SimpleReplayBuffer(env.obs_dim() + env.goal_dim, env.action_dim(), 100)
-    s_g = env.reset()
-    for i in range(10):
-        action = np.random.uniform(size=env.action_dim(), low=-1, high=1)
-        s_g, reward, done, _ = env.step(action)
-        print(s_g)
-        print(env.calc_reward_reach(s_g))
+    inspect_observations(True)
+    # cfg = PICK_PLACE_DEFAULT_ENV_CFG
+    # cfg['has_renderer'] = True
+    # cfg['initialization_noise'] = 'default'
+    # env = PickPlaceGoalPick()
+    # rb = SimpleReplayBuffer(env.obs_dim() + env.goal_dim, env.action_dim(), 100)
+    # for i in range(10):
+    #     env.reset()
+    #     env.render()
+    #     time.sleep(5)
     
 
 if __name__ == "__main__":

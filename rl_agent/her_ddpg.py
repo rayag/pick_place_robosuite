@@ -1,44 +1,100 @@
-from rl_agent.ddpg import DDPGAgent, CriticNetwork
+from rl_agent.ddpg import DDPGAgent, ActorNetwork, CriticNetwork, BASE_RESULTS_PATH
+from environment.PickPlaceGoal import PickPlaceGoalPick
+from environment.pick_place_wrapper import PICK_PLACE_DEFAULT_ENV_CFG
+from logger.logger import ProgressLogger
+from replay_buffer.simple_replay_buffer import SimpleReplayBuffer
+
 import torch
 import torch.optim as optim
 import numpy as np
+import datetime
+import os
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-class HERDDPGAgent(DDPGAgent):
-    def __init__(self, env, obs_dim, action_dim, goal_dim, update_iterations=2, batch_size=256, use_experience=True) -> None:
-        super().__init__(env, obs_dim + goal_dim, action_dim, update_iterations, batch_size, use_experience)
+class DDPGHERAgent(DDPGAgent):
+    def __init__(self, env, obs_dim, action_dim, goal_dim, update_iterations=2, batch_size=256, use_experience=True, descr = '') -> None:
+        self.env = env
+        self.obs_dim = obs_dim
+        self.action_dim = action_dim
         self.goal_dim = goal_dim
 
-        # overwrite critic definition
-        self.critic = CriticNetwork(dim=self.obs_dim + self.action_dim).cuda()
-        self.critic_target = CriticNetwork(dim=self.obs_dim + self.action_dim).cuda()
+        self.init_replay_buffer()
+
+        self.actor = ActorNetwork(obs_dim=self.obs_dim + self.goal_dim, action_dim=self.action_dim)
+        self.actor_target = ActorNetwork(obs_dim=self.obs_dim + self.goal_dim, action_dim=self.action_dim)
+        self.actor_target.load_state_dict(self.actor.state_dict())
+        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=1e-4)
+
+        self.critic = CriticNetwork(self.obs_dim + self.goal_dim, self.action_dim)
+        self.critic_target = CriticNetwork(self.obs_dim + self.goal_dim, self.action_dim)
         self.critic_target.load_state_dict(self.critic.state_dict())
-        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=1e-3)
+        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=5e-3)
 
-    def train(self, env, iterations=2000, episode_len=500):
+        self.update_iterations = update_iterations
+        self.batch_size = batch_size
+        self.gamma = 0.99
+        self.polyak = 0.995
 
-        for ep in range(iterations):
-            obs = env.reset()
-            goal = env.generate_goal()
-            episode_return = 0
-            # Gather experience
-            actor_loss, critic_loss = 0, 0
-            episode_obs = np.zeros(shape=(episode_len, self.obs_dim))
-            for t in range(episode_len):
-                obs = torch.FloatTensor(obs).to(device)
-                action = self.actor(torch.cat((obs, goal), dim=1))
-                action_detached = (action.cpu().detach().numpy() + np.random.normal(scale=0.1, size=self.action_dim))\
-                    .clip(self.env.action_space.low, self.env.action_space.high)
-                next_obs, _, done, _ = self.env.step(action_detached)
-                reward = env.calc_reward(goal)
-                self.replay_buffer.add(np.concatenate((obs.cpu().numpy(), goal), action_detached, 
-                    np.concatenate((next_obs, goal)), reward, done))
-                episode_obs[t] = next_obs
-                obs = next_obs
-                t += 1
-                episode_return += reward
+        date_str = datetime.datetime.today().strftime('%Y-%m-%d-%H-%M-%S')
+        self.path = os.path.join(BASE_RESULTS_PATH, "DDPG-" + descr + "-" + date_str)
+        print(f"Using path {self.path}")
+        if not os.path.exists(self.path):
+            os.makedirs(self.path)
+        self.logger = ProgressLogger(self.path)
 
-                if t % self.update_period == 0:
-                    actor_loss, critic_loss = self.update(t)
-                    
+    def init_replay_buffer(self):
+        self.replay_buffer = SimpleReplayBuffer(obs_dim=self.obs_dim + self.goal_dim, action_dim=self.action_dim)
+
+    def train(self, epochs=200, episodes_ep=1000, episode_len=500, exploration_eps=0.1, future_goals = 4):
+
+        for e in range(epochs):
+            success_count = 0
+            for ep in range(episodes_ep):
+                obs, goal = self.env.reset()
+                episode_return = 0
+                # Gather experience
+                actor_loss, critic_loss = 0, 0
+                done = False
+                t = 0
+                while not done and t < episode_len:
+                    obs_goal_torch = torch.FloatTensor(np.concatenate((obs, goal))).to(device)
+
+                    p = np.random.rand()
+                    if p < exploration_eps:
+                        action_detached = np.random.uniform(size=self.action_dim, low=self.env.action_space.low, high=self.env.action_space.high)
+                    else:
+                        action = self.actor(obs_goal_torch)
+                        action_detached = action.cpu().detach().numpy().clip(self.env.action_space.low, self.env.action_space.high)
+                    next_obs, reward, done, _, goal = self.env.step(action_detached)
+                    self.replay_buffer.add(np.concatenate((obs, goal)), action_detached, np.concatenate((next_obs, goal)), reward, done)
+                    obs = next_obs
+                    t += 1
+                    episode_return += reward
+                    if done:
+                        success_count += 1
+                
+                ep_obs_g, ep_actions, ep_next_obs_g, _, _ = self.replay_buffer.get_last_episode_transitions(episode_len)
+                for t in range(episode_len):
+                    G = self.env.generate_new_goals_from_episode(future_goals, ep_obs_g, ep_next_obs_g, t)
+                    for g in G:
+                        new_obs_goal = self.env.replace_goal(np.copy(ep_obs_g[t]), g)
+                        new_next_obs_goal = self.env.replace_goal(np.copy(ep_next_obs_g[t]), g)
+                        new_reward = self.env.calc_reward_reach(new_next_obs_goal, g)
+                        self.replay_buffer.add(new_obs_goal, ep_actions[t], new_next_obs_goal, new_reward, new_reward == 1.0)
+            print(f"Success rate: {success_count * 100.0 / episodes_ep}%")
+
+            _,_,_ = self.update(False)
+
+def main():
+    env_cfg = PICK_PLACE_DEFAULT_ENV_CFG
+    env_cfg['pick_only'] = True
+    env_cfg['horizon'] = 200
+    # env_cfg['has_renderer'] = True
+    env = PickPlaceGoalPick(env_config=env_cfg)
+    agent = DDPGHERAgent(env=env, obs_dim=env.obs_dim, action_dim=env.action_dim, goal_dim=env.goal_dim, use_experience=False)
+    agent.train(epochs=1000, episodes_ep=10)
+
+if __name__ == '__main__':
+    main()
+
