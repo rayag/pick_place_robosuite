@@ -107,7 +107,7 @@ def main():
     # env_cfg['has_renderer'] = True
     env = PickPlaceGoalPick(env_config=env_cfg)
     agent = DDPGHERAgent(env=env, obs_dim=env.obs_dim, action_dim=env.action_dim, goal_dim=env.goal_dim, actor_lr=args.actor_lr, critic_lr=args.critic_lr, results_dir=args.results_dir, descr='HER')
-    # agent.train(epochs=1000, episodes_ep=100)
+    agent.train(epochs=1000, episodes_ep=100)
 
 if __name__ == '__main__':
     main()
