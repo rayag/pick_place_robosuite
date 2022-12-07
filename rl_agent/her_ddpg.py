@@ -181,13 +181,13 @@ def main():
         episode_len=150,
         action_dim=env.action_dim, 
         goal_dim=env.goal_dim, 
-        actor_lr=args.actor_lr, 
-        critic_lr=args.critic_lr, 
+        actor_lr=float(args.actor_lr), 
+        critic_lr=float(args.critic_lr), 
         results_dir=args.results_dir, 
         normalize_data=args.normalize,
-        update_iterations=args.update_it,
+        update_iterations=int(args.update_it),
         descr='HER')
-    agent.train(epochs=args.epochs, episodes_ep=args.ep_per_epoch, update_period=args.update_period, exploration_eps=args.exp_eps)
+    agent.train(epochs=int(args.epochs), episodes_ep=int(args.ep_per_epoch), update_period=int(args.update_period), exploration_eps=float(args.exp_eps))
 
 if __name__ == '__main__':
     main()
