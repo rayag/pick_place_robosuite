@@ -50,7 +50,7 @@ def running_average(x, n = 10):
 
 def main():
     # visulize_from_progress_csv("/home/raya/ray_results/DDPG_PickPlaceGrabbedCan_2022-11-21_23-40-413uklke4y/progress.csv")
-    visualise_from_custom_progress_file("/home/rayageorgieva/uni/results/DDPG--2022-12-07-21-14-08")
+    visualise_from_custom_progress_file("/home/rayageorgieva/uni/results/DDPG--2022-12-07-23-04-34")
 
 if __name__ == "__main__":
     main()

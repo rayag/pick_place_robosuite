@@ -32,6 +32,7 @@ def play_demos(n: int, record_video = False, video_path = "./video"):
         for i in range(n):
             ep = demos[indices[i]]
             print(f"Playing {ep}..")
+            ep_return = 0
             if record_video:
                 fv = open(f"{video_path}/{ep}.mp4", 'w')
                 fv.close()
@@ -46,15 +47,18 @@ def play_demos(n: int, record_video = False, video_path = "./video"):
             while t < actions.shape[0]:
                 if done:
                     action = np.zeros(shape=actions.shape[1])
+                    break
                 else:
                     action = actions[t]
                 obs, reward, done, _ = env.step(action)
+                ep_return = ep_return + reward
                 print(f"Reward: {reward} {rs[t]} Done: {done} {dones[t]}")
                 if record_video:
                     video_writer.append_data(np.rot90(np.rot90((obs['frontview_image']))))
                 else:
                     env.render()
                 t = t + 1
+            print(f"Episode return {ep_return}")
             if video_writer:
                 video_writer.close()
 

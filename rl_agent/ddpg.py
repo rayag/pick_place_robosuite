@@ -19,11 +19,8 @@ class ActorNetwork(nn.Module):
         self.action_high = action_high
         self.action_low = action_low
         self.input = nn.Linear(obs_dim, 256).to(device) #TODO: allow custom layer sizes
-
         self.h1 = nn.Linear(256, 256).to(device)
-
         self.h2 = nn.Linear(256, 256).to(device)
-
         self.output = nn.Linear(256, action_dim).to(device)
 
     def forward(self, obs):
@@ -74,12 +71,12 @@ class DDPGAgent:
         self.actor = ActorNetwork(obs_dim=self.obs_dim, action_dim=self.action_dim)
         self.actor_target = ActorNetwork(obs_dim=self.obs_dim, action_dim=self.action_dim)
         self.actor_target.load_state_dict(self.actor.state_dict())
-        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=5e-5)
+        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=1e-5)
 
         self.critic = CriticNetwork(self.obs_dim, self.action_dim)
         self.critic_target = CriticNetwork(self.obs_dim, self.action_dim)
         self.critic_target.load_state_dict(self.critic.state_dict())
-        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=5e-4)
+        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=1e-4)
 
         self.update_iterations = update_iterations
         self.batch_size = batch_size
@@ -204,12 +201,12 @@ class DDPGAgent:
             actor_losses[it] = actor_loss.detach()
             values[it] = q.mean().detach()
 
-            # Soft update target networks
-            for target_critic_params, critic_params in zip(self.critic_target.parameters(), self.critic.parameters()):
-                target_critic_params.data.copy_(self.polyak * target_critic_params.data + (1.0 - self.polyak) * critic_params.data)
+        # Soft update target networks
+        for target_critic_params, critic_params in zip(self.critic_target.parameters(), self.critic.parameters()):
+            target_critic_params.data.copy_(self.polyak * target_critic_params.data + (1.0 - self.polyak) * critic_params.data)
 
-            for target_actor_params, actor_params in zip(self.actor_target.parameters(), self.actor.parameters()):
-                target_actor_params.data.copy_(self.polyak * target_actor_params.data + (1.0 - self.polyak) * actor_params.data)
+        for target_actor_params, actor_params in zip(self.actor_target.parameters(), self.actor.parameters()):
+            target_actor_params.data.copy_(self.polyak * target_actor_params.data + (1.0 - self.polyak) * actor_params.data)
         return actor_losses.mean().detach(), critic_losses.mean().detach(), values.mean().detach()
 
     def save(self, it):

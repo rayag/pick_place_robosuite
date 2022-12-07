@@ -57,10 +57,11 @@ def main():
         obs_dim=env.obs_dim(), 
         action_dim=env.action_dim(), 
         batch_size=512, 
+        episode_len=200,
         update_iterations=16, 
         update_period=4, 
         use_experience=True)
-    agent.train(iterations=10000, episode_len=200, updates_before_train=100) # TODO: add better experiment description
+    agent.train(iterations=10000, updates_before_train=100) # TODO: add better experiment description
 
 if __name__ == '__main__':
     main()
