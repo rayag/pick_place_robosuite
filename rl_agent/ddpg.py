@@ -19,16 +19,12 @@ class ActorNetwork(nn.Module):
         self.action_high = action_high
         self.action_low = action_low
         self.input = nn.Linear(obs_dim, 256).to(device) #TODO: allow custom layer sizes
-        torch.nn.init.xavier_uniform_(self.input.weight)
 
         self.h1 = nn.Linear(256, 256).to(device)
-        torch.nn.init.xavier_uniform_(self.h1.weight)
 
         self.h2 = nn.Linear(256, 256).to(device)
-        torch.nn.init.xavier_uniform_(self.h2.weight)
 
         self.output = nn.Linear(256, action_dim).to(device)
-        torch.nn.init.xavier_uniform_(self.output.weight)
 
     def forward(self, obs):
         x = F.relu(self.input(obs))
@@ -41,16 +37,11 @@ class CriticNetwork(nn.Module):
     def __init__(self, obs_dim, action_dim) -> None:
         super().__init__()
         self.input = nn.Linear(obs_dim, 256).to(device)
-        torch.nn.init.xavier_uniform_(self.input.weight)
 
         self.h1 = nn.Linear(256 + action_dim, 256).to(device)
-        torch.nn.init.xavier_uniform_(self.h1.weight)
-
         self.h2 = nn.Linear(256, 256).to(device)
-        torch.nn.init.xavier_uniform_(self.h2.weight)
 
         self.output = nn.Linear(256, 1).to(device)
-        torch.nn.init.xavier_uniform_(self.output.weight)
 
     def forward(self, s, a):
         x = F.relu(self.input(s))
