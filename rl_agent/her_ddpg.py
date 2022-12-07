@@ -17,13 +17,14 @@ import time
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class DDPGHERAgent(DDPGAgent):
-    def __init__(self, env, obs_dim, action_dim, goal_dim, episode_len=200, update_iterations=4, batch_size=256, actor_lr = 1e-3, critic_lr = 1e-3, descr='', results_dir='./results') -> None:
+    def __init__(self, env, obs_dim, action_dim, goal_dim, episode_len=200, update_iterations=4, 
+        batch_size=256, actor_lr = 1e-3, critic_lr = 1e-3, descr='', results_dir='./results', normalize_data=True) -> None:
         self.env = env
         self.obs_dim = obs_dim
         self.action_dim = action_dim
         self.goal_dim = goal_dim
 
-        self.init_replay_buffer(episode_len, env.get_reward_fn())
+        self.init_replay_buffer(episode_len, env.get_reward_fn(), normalize_data)
 
         self.actor = ActorNetwork(obs_dim=self.obs_dim + self.goal_dim, action_dim=self.action_dim)
         self.actor_target = ActorNetwork(obs_dim=self.obs_dim + self.goal_dim, action_dim=self.action_dim)
@@ -47,7 +48,7 @@ class DDPGHERAgent(DDPGAgent):
             os.makedirs(self.path)
         self.logger = ProgressLogger(self.path)
 
-    def init_replay_buffer(self, episode_len, reward_fn):
+    def init_replay_buffer(self, episode_len, reward_fn, normalize_data):
         self.replay_buffer = HERReplayBuffer(capacity=int(1e6), 
             episode_len=episode_len, 
             action_dim=self.action_dim, 
@@ -55,7 +56,8 @@ class DDPGHERAgent(DDPGAgent):
             goal_dim=self.goal_dim,
             k=4,
             sample_strategy=None,
-            reward_fn=reward_fn)
+            reward_fn=reward_fn,
+            normalize_data=normalize_data)
 
     def train(self, epochs=200, episodes_ep=1000, episode_len=500, exploration_eps=0.1, future_goals = 4):
         complete_episodes = 0
@@ -107,7 +109,7 @@ class DDPGHERAgent(DDPGAgent):
                 self.logger.add(1 if success else 0, actor_loss, critic_loss, complete_episodes, value)
             self.save(e)
             end_epoch = time.time()
-            print(f"Epoch: {e} Success rate: {success_count * 100.0 / episodes_ep}% Duration: {end_epoch-start_epoch}s")
+            self.logger.print_and_log_output(f"Epoch: {e} Success rate: {success_count * 100.0 / episodes_ep}% Duration: {end_epoch-start_epoch}s")
 
     def update(self):
         actor_losses = torch.Tensor(np.zeros(shape=(self.update_iterations)))
@@ -157,23 +159,29 @@ def main():
         help='Directory which will hold the results of the experiments')
     parser.add_argument('-alr', '--actor-lr', default=1e-3)
     parser.add_argument('-clr', '--critic-lr', default=1e-3)
+    parser.add_argument('--epochs', default=1000, type=int)
+    parser.add_argument('--ep_per_epoch', default=100, type=int)
+    parser.add_argument('--exp_eps', default=0, type=float)
+    parser.add_argument('--normalize', action='store_true', default=False)
     args = parser.parse_args()
     print(f"Actor alpha {args.actor_lr}, Critic alpha {args.critic_lr}")
 
     env_cfg = PICK_PLACE_DEFAULT_ENV_CFG
     env_cfg['pick_only'] = True
-    env_cfg['horizon'] = 200
+    env_cfg['horizon'] = 150
     env_cfg['initialization_noise'] = None
     # env_cfg['has_renderer'] = True
     env = PickPlaceGoalPick(env_config=env_cfg)
     agent = DDPGHERAgent(env=env, obs_dim=env.obs_dim, 
+        episode_len=150,
         action_dim=env.action_dim, 
         goal_dim=env.goal_dim, 
         actor_lr=args.actor_lr, 
         critic_lr=args.critic_lr, 
         results_dir=args.results_dir, 
+        normalize_data=args.normalize,
         descr='HER')
-    agent.train(epochs=1000, episodes_ep=100, exploration_eps=0, episode_len=200)
+    agent.train(epochs=args.epochs, episodes_ep=args.ep_per_epoch, exploration_eps=args.exp_eps, episode_len=150)
 
 if __name__ == '__main__':
     main()

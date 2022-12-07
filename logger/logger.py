@@ -3,7 +3,8 @@ import os
 
 class ProgressLogger:
     def __init__(self, path) -> None:
-        self.file_path = os.path.join(path, "progress.csv")
+        self.progress_file_path = os.path.join(path, "progress.csv")
+        self.output_file_path = os.path.join(path, 'output.txt')
         self.capacity = 100
         self.returns = np.zeros(shape=(self.capacity,), dtype=np.float32)
         self.actor_loss = np.zeros(shape=(self.capacity,), dtype=np.float32)
@@ -11,7 +12,7 @@ class ProgressLogger:
         self.values = np.zeros(shape=(self.capacity,), dtype=np.float32)
         self.complete_episodes = np.zeros(shape=(self.capacity,), dtype=np.float32)
         self.it = 0
-        with open(self.file_path, 'w+') as f:
+        with open(self.progress_file_path, 'w+') as f:
             f.write("returns,actor_loss,critic_loss,complete_episodes,values\n")
     
     def add(self, ep_return, actor_loss, critic_loss, complete_episodes, value):
@@ -22,10 +23,15 @@ class ProgressLogger:
         self.values[self.it] = value
         self.it += 1
         if self.it == self.capacity:
-            with open(self.file_path, "a") as f:
+            with open(self.progress_file_path, "a") as f:
                 for i in range(self.it):
                     f.write(f"{self.returns[i]},{self.actor_loss[i]},{self.critic_loss[i]},{self.complete_episodes[i]},{self.values[i]}\n")
             self.it = 0
+
+    def print_and_log_output(self, output):
+        print(output)
+        with open(self.output_file_path, 'w+') as f:
+            f.write(output + "\n")
 
     def print_last_ten_runs_stat(self, current_iteration):
         if self.it >= 10:
