@@ -38,7 +38,7 @@ def play_demos(n: int, record_video = False, video_path = "./video"):
                 video_writer = imageio.get_writer(f"{video_path}/{ep}.mp4", fps=20)
             states = f["data/{}/states".format(ep)][()]
             actions = f["data/{}/actions".format(ep)][()]
-            rs = f["data/{}/rewards".format(ep)][()]
+            rs = f["data/{}/reward_pick_only".format(ep)][()]
             dones = f["data/{}/dones".format(ep)][()]
             env.reset_to(states[0])
             done = False

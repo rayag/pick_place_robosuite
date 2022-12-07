@@ -19,13 +19,14 @@ def train(cfg: GlobalConfig):
         obs_dim=env.obs_dim(), 
         action_dim=env.action_dim(), 
         batch_size=512, 
-        update_iterations=16, 
-        update_period=4, 
+        update_iterations=40, 
+        update_period=16, 
+        episode_len=200,
         use_experience=True,
         results_dir=cfg.results_dir,
         demo_dir=cfg.demo_dir,
         checkpoint_dir=cfg.checkpoint_dir)
-    agent.train(iterations=10000, episode_len=200, updates_before_train=100) # TODO: add better experiment description
+    agent.train(iterations=10000, updates_before_train=100) # TODO: add better experiment description
 
 def rollout(cfg: GlobalConfig):
     env_cfg = PICK_PLACE_DEFAULT_ENV_CFG

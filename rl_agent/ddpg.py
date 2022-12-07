@@ -66,6 +66,7 @@ class DDPGAgent:
         action_dim, 
         update_iterations = 2, 
         batch_size = 256, 
+        episode_len = 200,
         use_experience = True, 
         update_period = 1, 
         descr = "",
@@ -76,7 +77,8 @@ class DDPGAgent:
         self.env = env
         self.obs_dim = obs_dim
         self.action_dim = action_dim
-        self.init_replay_buffer(use_experience, demo_dir)
+        self.episode_len = episode_len
+        self.init_replay_buffer(use_experience, demo_dir, episode_len)
 
         self.actor = ActorNetwork(obs_dim=self.obs_dim, action_dim=self.action_dim)
         self.actor_target = ActorNetwork(obs_dim=self.obs_dim, action_dim=self.action_dim)
@@ -90,8 +92,8 @@ class DDPGAgent:
 
         self.update_iterations = update_iterations
         self.batch_size = batch_size
-        self.gamma = 0.99
-        self.polyak = 0.995
+        self.gamma = 0.98
+        self.polyak = 0.99
 
         date_str = datetime.today().strftime('%Y-%m-%d-%H-%M-%S')
         self.path = os.path.join(results_dir, "DDPG-" + descr + "-" + date_str)
@@ -106,8 +108,8 @@ class DDPGAgent:
         else:
             print("No checkpoint dir specified")
 
-    def init_replay_buffer(self, use_experience, demo_dir):
-        self.replay_buffer = SimpleReplayBuffer(obs_dim=self.obs_dim, action_dim=self.action_dim)
+    def init_replay_buffer(self, use_experience, demo_dir, ep_len):
+        self.replay_buffer = SimpleReplayBuffer(obs_dim=self.obs_dim, action_dim=self.action_dim, episode_len=ep_len)
         self.use_experience = use_experience
         if use_experience:
             self.replay_buffer.load_examples_from_file(demo_dir)
@@ -130,7 +132,7 @@ class DDPGAgent:
                 self.env.render()
             print(f"Episode {ep}: return {ep_return}")
 
-    def train(self, iterations=2000, episode_len=500, exploration_p=0.2, updates_before_train=1000, ignore_done=True):
+    def train(self, iterations=2000, exploration_p=0.2, updates_before_train=1000, ignore_done=True):
         if self.use_experience:
             print(f"Performing {updates_before_train} updates before train")
             for i in range(updates_before_train):
@@ -146,7 +148,7 @@ class DDPGAgent:
             t = 0
             done = False
             actor_loss, critic_loss = 0, 0
-            while t < episode_len:
+            while t < self.episode_len:
                 obs = torch.FloatTensor(obs).to(device)
                 p = np.random.rand()
                 if p < exploration_p:

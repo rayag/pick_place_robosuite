@@ -38,15 +38,15 @@ def collect_observations():
                 t = t + 1
             del f["data/{}/reward_pick_only".format(ep)]
             f.create_dataset("data/{}/reward_pick_only".format(ep), data=rs)
-            f.create_dataset("data/{}/obs_flat".format(ep), data=obss)
-            f.create_dataset("data/{}/next_obs_flat".format(ep), data=obss)
+            # f.create_dataset("data/{}/obs_flat".format(ep), data=obss)
+            # f.create_dataset("data/{}/next_obs_flat".format(ep), data=obss)
         print(f"Mean steps per episode {sum_steps / len(demos)}")
 
 class SimpleReplayBuffer:
     """
     Replay buffer holding (s, a, s', r, d) tuples
     """
-    def __init__(self, obs_dim: int, action_dim: int, capacity: int = 1000000) -> None:
+    def __init__(self, obs_dim: int, action_dim: int, capacity: int = 1000000, episode_len = 200) -> None:
         self.obs = np.zeros([capacity, obs_dim], dtype=np.float32)
         self.actions = np.zeros([capacity, action_dim], dtype=np.float32)
         self.next_obs = np.zeros([capacity, obs_dim], dtype=np.float32)
@@ -55,6 +55,7 @@ class SimpleReplayBuffer:
         self.it = 0 # shows position to include next item
         self.capacity = capacity
         self.size = 0
+        self.episode_len = episode_len
     
     def add(self, obs, action, next_obs, reward, done):
         self.obs[self.it] = obs
@@ -111,11 +112,11 @@ class SimpleReplayBuffer:
                 last_t = 0
                 t = 0
                 done = False
-                while t < actions_ep.shape[0]:
+                while t < self.episode_len and t < actions_ep.shape[0]:
                     if done:
                         self.add(obs_ep[last_t], np.zeros_like(actions_ep[0]), next_obs_ep[last_t], rewards_ep[last_t], done)
                     else:
-                        done = rewards_ep[t] >= 10
+                        done = rewards_ep[t] >= 1
                         self.add(obs_ep[t], actions_ep[t], next_obs_ep[t], rewards_ep[t], done)
                         last_t = t
                     t += 1

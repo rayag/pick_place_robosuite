@@ -17,7 +17,7 @@ import time
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class DDPGHERAgent(DDPGAgent):
-    def __init__(self, env, obs_dim, action_dim, goal_dim, episode_len=200, update_iterations=4, 
+    def __init__(self, env, obs_dim, action_dim, goal_dim, episode_len=200, update_iterations=4, update_period=1,
         batch_size=256, actor_lr = 1e-3, critic_lr = 1e-3, descr='', results_dir='./results', normalize_data=True) -> None:
         self.env = env
         self.obs_dim = obs_dim
@@ -29,17 +29,18 @@ class DDPGHERAgent(DDPGAgent):
         self.actor = ActorNetwork(obs_dim=self.obs_dim + self.goal_dim, action_dim=self.action_dim)
         self.actor_target = ActorNetwork(obs_dim=self.obs_dim + self.goal_dim, action_dim=self.action_dim)
         self.actor_target.load_state_dict(self.actor.state_dict())
-        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=1e-3)
+        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=actor_lr)
 
         self.critic = CriticNetwork(self.obs_dim + self.goal_dim, self.action_dim)
         self.critic_target = CriticNetwork(self.obs_dim + self.goal_dim, self.action_dim)
         self.critic_target.load_state_dict(self.critic.state_dict())
-        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=1e-2)
+        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=critic_lr)
 
         self.update_iterations = update_iterations
         self.batch_size = batch_size
-        self.gamma = 0.99
+        self.gamma = 0.98
         self.polyak = 0.995
+        self.update_period = update_period
 
         date_str = datetime.datetime.today().strftime('%Y-%m-%d-%H-%M-%S')
         self.path = os.path.join(results_dir, "DDPG-" + descr + "-" + date_str)
@@ -59,7 +60,7 @@ class DDPGHERAgent(DDPGAgent):
             reward_fn=reward_fn,
             normalize_data=normalize_data)
 
-    def train(self, epochs=200, episodes_ep=1000, episode_len=500, exploration_eps=0.1, future_goals = 4):
+    def train(self, epochs=200, episodes_ep=1000, exploration_eps=0.1, future_goals = 4):
         complete_episodes = 0
         for e in range(epochs):
             success_count = 0
@@ -105,8 +106,9 @@ class DDPGHERAgent(DDPGAgent):
                     complete_episodes += 1
 
                 self.replay_buffer.add(ep_obs, ep_actions, ep_next_obs, ep_rewards, ep_achieved_goals, ep_desired_goals)
-                actor_loss, critic_loss, value = self.update()
-                self.logger.add(1 if success else 0, actor_loss, critic_loss, complete_episodes, value)
+                if ep % self.update_period == 0:
+                    actor_loss, critic_loss, value = self.update()
+                    self.logger.add(1 if success else 0, actor_loss, critic_loss, complete_episodes, value)
             self.save(e)
             end_epoch = time.time()
             self.logger.print_and_log_output(f"Epoch: {e} Success rate: {success_count * 100.0 / episodes_ep}% Duration: {end_epoch-start_epoch}s")
@@ -144,12 +146,12 @@ class DDPGHERAgent(DDPGAgent):
             actor_losses[it] = actor_loss.detach()
             values[it] = q.mean().detach()
 
-            # Soft update target networks
-            for target_critic_params, critic_params in zip(self.critic_target.parameters(), self.critic.parameters()):
-                target_critic_params.data.copy_(self.polyak * target_critic_params.data + (1.0 - self.polyak) * critic_params.data)
+        # Soft update target networks
+        for target_critic_params, critic_params in zip(self.critic_target.parameters(), self.critic.parameters()):
+            target_critic_params.data.copy_(self.polyak * target_critic_params.data + (1.0 - self.polyak) * critic_params.data)
 
-            for target_actor_params, actor_params in zip(self.actor_target.parameters(), self.actor.parameters()):
-                target_actor_params.data.copy_(self.polyak * target_actor_params.data + (1.0 - self.polyak) * actor_params.data)
+        for target_actor_params, actor_params in zip(self.actor_target.parameters(), self.actor.parameters()):
+            target_actor_params.data.copy_(self.polyak * target_actor_params.data + (1.0 - self.polyak) * actor_params.data)
         return actor_losses.mean().detach(), critic_losses.mean().detach(), values.mean().detach()
 
 def main():
@@ -163,6 +165,9 @@ def main():
     parser.add_argument('--ep_per_epoch', default=100, type=int)
     parser.add_argument('--exp_eps', default=0, type=float)
     parser.add_argument('--normalize', action='store_true', default=False)
+    parser.add_argument('--update_period', default=1)
+    parser.add_argument('--update_it', default=2)
+    parser.add_argument('--k', default=4)
     args = parser.parse_args()
     print(f"Actor alpha {args.actor_lr}, Critic alpha {args.critic_lr}")
 
@@ -180,8 +185,9 @@ def main():
         critic_lr=args.critic_lr, 
         results_dir=args.results_dir, 
         normalize_data=args.normalize,
+        update_iterations=args.update_it,
         descr='HER')
-    agent.train(epochs=args.epochs, episodes_ep=args.ep_per_epoch, exploration_eps=args.exp_eps, episode_len=150)
+    agent.train(epochs=args.epochs, episodes_ep=args.ep_per_epoch, update_period=args.update_period, exploration_eps=args.exp_eps)
 
 if __name__ == '__main__':
     main()

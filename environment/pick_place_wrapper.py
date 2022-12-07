@@ -67,10 +67,8 @@ class PickPlaceWrapper(gym.Env):
             reach, grasp, _, _ = self.gym_env.env.staged_rewards()
             if grasp > 0:
                 reward = 1
-            elif reach < 0.001:
-                reward = reach / 10
             else:
-                reward = reach * 10
+                reward = 20 * reach - 1
             return obs, reward, reward==1, info
         return obs, reward, done, info
 
