@@ -23,6 +23,7 @@ class DDPGHERAgent(DDPGAgent):
         self.obs_dim = obs_dim
         self.action_dim = action_dim
         self.goal_dim = goal_dim
+        self.episode_len = episode_len
 
         self.init_replay_buffer(episode_len, env.get_reward_fn(), normalize_data)
 
@@ -69,17 +70,17 @@ class DDPGHERAgent(DDPGAgent):
                 obs, goal = self.env.reset()
                 episode_return = 0
             
-                ep_obs = np.zeros(shape=(episode_len, self.obs_dim))
-                ep_actions = np.zeros(shape=(episode_len, self.action_dim))
-                ep_next_obs = np.zeros(shape=(episode_len, self.obs_dim))
-                ep_rewards = np.zeros(shape=(episode_len, 1))
-                ep_achieved_goals = np.zeros(shape=(episode_len, self.goal_dim))
-                ep_desired_goals = np.zeros(shape=(episode_len, self.goal_dim))
+                ep_obs = np.zeros(shape=(self.episode_len, self.obs_dim))
+                ep_actions = np.zeros(shape=(self.episode_len, self.action_dim))
+                ep_next_obs = np.zeros(shape=(self.episode_len, self.obs_dim))
+                ep_rewards = np.zeros(shape=(self.episode_len, 1))
+                ep_achieved_goals = np.zeros(shape=(self.episode_len, self.goal_dim))
+                ep_desired_goals = np.zeros(shape=(self.episode_len, self.goal_dim))
                 # Gather experience
                 actor_loss, critic_loss = 0, 0
                 reward = 0
                 success = False
-                for t in range(episode_len):
+                for t in range(self.episode_len):
                     obs_goal_torch = torch.FloatTensor(np.concatenate((obs, goal))).to(device)
                     p = np.random.rand()
                     if p < exploration_eps:
@@ -186,8 +187,9 @@ def main():
         results_dir=args.results_dir, 
         normalize_data=args.normalize,
         update_iterations=int(args.update_it),
+        update_period=int(args.update_period),
         descr='HER')
-    agent.train(epochs=int(args.epochs), episodes_ep=int(args.ep_per_epoch), update_period=int(args.update_period), exploration_eps=float(args.exp_eps))
+    agent.train(epochs=int(args.epochs), episodes_ep=int(args.ep_per_epoch), exploration_eps=float(args.exp_eps), future_goals=int(args.k))
 
 if __name__ == '__main__':
     main()
