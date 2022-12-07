@@ -4,7 +4,7 @@ import os
 class ProgressLogger:
     def __init__(self, path) -> None:
         self.file_path = os.path.join(path, "progress.csv")
-        self.capacity = 10
+        self.capacity = 100
         self.returns = np.zeros(shape=(self.capacity,), dtype=np.float32)
         self.actor_loss = np.zeros(shape=(self.capacity,), dtype=np.float32)
         self.critic_loss = np.zeros(shape=(self.capacity,), dtype=np.float32)

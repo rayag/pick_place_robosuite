@@ -104,7 +104,7 @@ class DDPGHERAgent(DDPGAgent):
 
                 self.replay_buffer.add(ep_obs, ep_actions, ep_next_obs, ep_rewards, ep_achieved_goals, ep_desired_goals)
                 actor_loss, critic_loss, value = self.update()
-                self.logger.add(1 if success else 0, actor_loss, critic_loss, value)
+                self.logger.add(1 if success else 0, actor_loss, critic_loss, complete_episodes, value)
             self.save(e)
             end_epoch = time.time()
             print(f"Epoch: {e} Success rate: {success_count * 100.0 / episodes_ep}% Duration: {end_epoch-start_epoch}s")
