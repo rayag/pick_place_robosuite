@@ -17,15 +17,24 @@ class PickPlaceGoalPick(gym.Env):
         self.goal = None
 
     def step(self, action):
+        '''
+        returns next observation, achieved_goal
+        '''
         obs, _, done, info = self.env_wrapper.step(action)
-        return obs, self.calc_reward_reach(obs, self.goal), done, info, self.goal,
+        return obs, self.extract_eef_pos_from_obs(obs)
 
     def reset(self):
+        '''
+        return observation, desired goal
+        '''
         obs = self.env_wrapper.reset()
         self.goal = self.generate_goal_pick()
         return obs, self.goal
 
     def reset_to(self, state):
+        '''
+        return observation, desired goal
+        '''
         obs = self.env_wrapper.reset_to(state=state)
         self.goal = self.generate_goal_pick()
         return obs, self.goal
@@ -59,11 +68,11 @@ class PickPlaceGoalPick(gym.Env):
             and np.abs(obj_pos[2] - goal[2]) < 0.1
         return 1.0 if goal_reached else 0.0
 
-    def calc_reward_reach(self, obs, desired_goal):
-        eef_pos = obs[35:38]
-        goal_reached = np.abs(eef_pos[0] - desired_goal[0]) < 0.02 \
-            and np.abs(eef_pos[1] - desired_goal[1]) < 0.02        \
-            and np.abs(eef_pos[2] - desired_goal[2]) < 0.02
+    @staticmethod
+    def calc_reward_reach(achieved_goal, desired_goal):
+        goal_reached = np.abs(achieved_goal[0] - desired_goal[0]) < 0.02 \
+            and np.abs(achieved_goal[1] - desired_goal[1]) < 0.02        \
+            and np.abs(achieved_goal[2] - desired_goal[2]) < 0.02
         return 1.0 if goal_reached else 0.0
 
     def render(self):
@@ -73,24 +82,11 @@ class PickPlaceGoalPick(gym.Env):
         assert obs_g.shape[0] == (self.obs_dim + self.goal_dim)
         return obs_g[-self.goal_dim:]
 
-    def extract_eef_pos_from_obs_g(self, obs_g):
-        return obs_g[35:38]
-    
-    def replace_goal(self, obs_g, new_goal):
-        obs_g[-self.goal_dim:] = new_goal
-        return obs_g
+    def extract_eef_pos_from_obs(self, obs):
+        return obs[35:38]
 
-    def generate_new_goals_from_episode(self, k, episode_obs_g, episode_obs_next_g, ep_t):
-        goals = np.zeros(shape=(k+1, self.goal_dim))
-        # one of the goals should be the achieved state from current step, i.e the pos of the EEF
-        obs_goal = episode_obs_next_g[ep_t]
-        goals[0] = self.extract_eef_pos_from_obs_g(obs_goal)
-        if ep_t < (episode_obs_g.shape[0]-1):
-            # future strategy
-            future_indices = np.random.randint(low=ep_t+1, high=episode_obs_g.shape[0], size=k)
-            obs_goal = episode_obs_g[future_indices]
-            goals[1:] = obs_goal[:,35:38] # TODO use function
-        return goals
+    def get_reward_fn(self):
+        return self.calc_reward_reach
 
     @property
     def action_dim(self):
@@ -118,9 +114,11 @@ def inspect_observations(visualize = False):
             ep_id = int(demos[i][5:])
             states = f["data/{}/states".format(ep)][()]
             acts = f["data/{}/actions".format(ep)][()]
+            rewards = f["data/{}/reward_pick_only".format(ep)][()]
             obs, goal = env.reset_to(states[0])
             sum_steps += states.shape[0]
             t = 0
+            ep_return = 0
             done = False
             while t < acts.shape[0]:
                 if done:
@@ -128,6 +126,7 @@ def inspect_observations(visualize = False):
                 else:
                     action = acts[t]
                 obs, reward, done, _, _ = env.step(action)
+                ep_return += reward
                 t = t + 1
                 if visualize:
                     env.render()

@@ -38,7 +38,7 @@ def visualise_from_custom_progress_file(path):
 
 def main():
     # visulize_from_progress_csv("/home/raya/ray_results/DDPG_PickPlaceGrabbedCan_2022-11-21_23-40-413uklke4y/progress.csv")
-    visualise_from_custom_progress_file("./results/DDPG-HER-2022-12-06-10-47-28")
+    visualise_from_custom_progress_file("./results/DDPG-HER-2022-12-07-02-43-04")
 
 if __name__ == "__main__":
     main()
