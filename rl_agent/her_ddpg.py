@@ -161,11 +161,11 @@ class DDPGHERAgent:
                     self.replay_buffer.add(ep_obs, ep_actions, ep_next_obs, ep_rewards, ep_achieved_goals, ep_desired_goals)
                     
                 actor_loss, critic_loss, value = self.update()
-                self.logger.add(iteration_success_count * 100.0 / episodes_per_iter, actor_loss, critic_loss, complete_episodes, value)
+                self.logger.add(reward, actor_loss, critic_loss, complete_episodes, value)
                 self.save(epoch * iterations_per_epoch + it)
                 self.logger.print_and_log_output(f"Ep {epoch} It {it} Success rate: {iteration_success_count * 100.0 / episodes_per_iter}%")
             end_epoch = time.time()
-            self.logger.print_and_log_output(f"Epoch: {epoch} Success rate: {epoch_success_count * 100.0 / iterations_per_epoch * episodes_per_iter}% Duration: {end_epoch-start_epoch}s")
+            self.logger.print_and_log_output(f"Epoch: {epoch} Success rate: {epoch_success_count * 100.0 / (iterations_per_epoch * episodes_per_iter)}% Duration: {end_epoch-start_epoch}s")
 
     def update(self):
         actor_losses = torch.Tensor(np.zeros(shape=(self.update_iterations)))
