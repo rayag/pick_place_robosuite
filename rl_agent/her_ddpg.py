@@ -112,10 +112,11 @@ class DDPGHERAgent:
 
     def train(self, epochs=200, iterations_per_epoch=100, episodes_per_iter=1000, exploration_eps=0.1, future_goals = 4):
         complete_episodes = 0
-        for e in range(epochs):
-            success_count = 0
+        for epoch in range(epochs):
+            epoch_success_count = 0
             start_epoch = time.time()
             for it in range(iterations_per_epoch):
+                iteration_success_count = 0
                 for ep in range(episodes_per_iter):
                     obs, goal = self.env.reset()
                     episode_return = 0
@@ -126,7 +127,7 @@ class DDPGHERAgent:
                     ep_rewards = np.zeros(shape=(self.episode_len, 1))
                     ep_achieved_goals = np.zeros(shape=(self.episode_len, self.goal_dim))
                     ep_desired_goals = np.zeros(shape=(self.episode_len, self.goal_dim))
-                    # Gather experience
+                    
                     actor_loss, critic_loss = 0, 0
                     reward = 0
                     success = False
@@ -140,7 +141,7 @@ class DDPGHERAgent:
                             action_detached = action.cpu().detach().numpy().clip(self.env.action_space.low, self.env.action_space.high)
                         next_obs, achieved_goal = self.env.step(action_detached)
                         reward = self.env.calc_reward_reach(achieved_goal, goal)
-                        if not success and reward > 0:
+                        if not success and reward == 0:
                             success = True
 
                         ep_obs[t] = obs
@@ -153,16 +154,18 @@ class DDPGHERAgent:
                         obs = next_obs
                         t += 1
                     if success:
-                        success_count += 1
+                        epoch_success_count += 1
                         complete_episodes += 1
+                        iteration_success_count += 1
 
                     self.replay_buffer.add(ep_obs, ep_actions, ep_next_obs, ep_rewards, ep_achieved_goals, ep_desired_goals)
                     
                 actor_loss, critic_loss, value = self.update()
-                self.logger.add(1 if success else 0, actor_loss, critic_loss, complete_episodes, value)
-                self.save(it)
+                self.logger.add(iteration_success_count * 100.0 / episodes_per_iter, actor_loss, critic_loss, complete_episodes, value)
+                self.save(epoch * iterations_per_epoch + it)
+                self.logger.print_and_log_output(f"Ep {epoch} It {it} Success rate: {iteration_success_count * 100.0 / episodes_per_iter}%")
             end_epoch = time.time()
-            self.logger.print_and_log_output(f"Epoch: {e} Success rate: {success_count * 100.0 / episodes_per_iter}% Duration: {end_epoch-start_epoch}s")
+            self.logger.print_and_log_output(f"Epoch: {epoch} Success rate: {epoch_success_count * 100.0 / iterations_per_epoch * episodes_per_iter}% Duration: {end_epoch-start_epoch}s")
 
     def update(self):
         actor_losses = torch.Tensor(np.zeros(shape=(self.update_iterations)))
@@ -227,10 +230,10 @@ def main():
     parser.add_argument('-clr', '--critic-lr', default=1e-3)
     parser.add_argument('--epochs', default=1000, type=int)
     parser.add_argument('--it_per_epoch', default=100, type=int)
-    parser.add_argument('--ep_per_it', default=20)
+    parser.add_argument('--ep_per_it', default=10)
     parser.add_argument('--exp_eps', default=0, type=float)
     parser.add_argument('--normalize', action='store_true', default=False)
-    parser.add_argument('--update_it', default=2)
+    parser.add_argument('--update_it', default=40)
     parser.add_argument('--k', default=4)
     args = parser.parse_args()
     print(f"Actor alpha {args.actor_lr}, Critic alpha {args.critic_lr}")

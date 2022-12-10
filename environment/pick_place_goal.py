@@ -73,14 +73,10 @@ class PickPlaceGoalPick(gym.Env):
         goal_reached = np.abs(achieved_goal[0] - desired_goal[0]) < 0.02 \
             and np.abs(achieved_goal[1] - desired_goal[1]) < 0.02        \
             and np.abs(achieved_goal[2] - desired_goal[2]) < 0.02
-        return 1.0 if goal_reached else 0.0
+        return 0.0 if goal_reached else -1.0
 
     def render(self):
         self.env_wrapper.render()
-
-    def extract_goal_from_obs_g(self, obs_g):
-        assert obs_g.shape[0] == (self.obs_dim + self.goal_dim)
-        return obs_g[-self.goal_dim:]
 
     def extract_eef_pos_from_obs(self, obs):
         return obs[35:38]
@@ -125,13 +121,14 @@ def inspect_observations(visualize = False):
                     action = np.zeros(shape=(acts.shape[1]))
                 else:
                     action = acts[t]
-                obs, reward, done, _, _ = env.step(action)
+                obs, achieved_goal = env.step(action)
+                reward = env.calc_reward_reach(achieved_goal, goal)
+                done = reward == 0.0
+                print(f"Reward {reward}")
                 ep_return += reward
                 t = t + 1
                 if visualize:
                     env.render()
-                if done or t == acts.shape[0]-1:
-                    print(env.calc_reward_reach(obs, goal))
 
 def main():
     inspect_observations(True)

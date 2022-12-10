@@ -72,20 +72,3 @@ class HERReplayBuffer:
         else:
             return self.obs[abs_indices], self.actions[abs_indices], self.next_obs[abs_indices], \
                 rewards_tmp[abs_indices], self.achieved_goals[abs_indices], self.achieved_goals[abs_fut_indices]
-
-def simple_reward(ag, dg):
-    return np.max(ag) - np.min(ag)
-
-def main():
-    buf = HERReplayBuffer(20, 5, 2, 2, 2, k=4, sample_strategy=None, reward_fn=simple_reward)
-    for e in range(4):
-        b = np.zeros(shape=(5, 2))
-        r = np.zeros(shape=(5,1))
-        for s in range(5):
-            b[s, :] = np.array([e*10 +s, e*10+s])
-        buf.add(b,b,b,r,b,b)
-    buf.sample(10)
-
-
-if __name__ == '__main__':
-    main()
