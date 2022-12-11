@@ -49,9 +49,10 @@ class CriticNetwork(nn.Module):
         return out
 
 class DDPGHERAgent:
-    def __init__(self, env, obs_dim, action_dim, goal_dim, episode_len=200, update_iterations=4,
-        batch_size=256, actor_lr = 1e-3, critic_lr = 1e-3, descr='', results_dir='./results', 
-        normalize_data=True, checkpoint_dir=None) -> None:
+    def __init__(self, env: PickPlaceGoalPick, obs_dim: int, action_dim: int, goal_dim: int, 
+        episode_len: int=200, update_iterations: int=4, batch_size: int=256, actor_lr :float=1e-3, 
+        critic_lr: float = 1e-3, descr: str='', results_dir: str='./results', 
+        normalize_data: bool=True, checkpoint_dir: str=None) -> None:
         self.env = env
         self.obs_dim = obs_dim
         self.action_dim = action_dim
@@ -108,7 +109,7 @@ class DDPGHERAgent:
                 action_dateched = action.cpu().detach().numpy()\
                     .clip(self.env.action_space.low, self.env.action_space.high)
                 next_obs, achieved_goal = self.env.step(action_dateched)
-                reward = self.env.calc_reward_reach(achieved_goal, goal)
+                reward = self.env.calc_reward_pick(achieved_goal, goal)
                 done = (reward == 0)
                 obs = next_obs
                 t += 1
@@ -146,7 +147,7 @@ class DDPGHERAgent:
                             action = self.actor(obs_goal_torch)
                             action_detached = action.cpu().detach().numpy().clip(self.env.action_space.low, self.env.action_space.high)
                         next_obs, achieved_goal = self.env.step(action_detached)
-                        reward = self.env.calc_reward_reach(achieved_goal, goal)
+                        reward = self.env.calc_reward_pick(achieved_goal, goal)
                         if not success and reward == 0:
                             success = True
 
@@ -250,7 +251,7 @@ def main():
     env_cfg['pick_only'] = True
     env_cfg['horizon'] = 150
     env_cfg['initialization_noise'] = None
-    env_cfg['has_renderer'] = True
+    # env_cfg['has_renderer'] = True
     env = PickPlaceGoalPick(env_config=env_cfg)
     agent = DDPGHERAgent(env=env, obs_dim=env.obs_dim, 
         episode_len=150,
