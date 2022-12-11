@@ -21,7 +21,7 @@ class PickPlaceGoalPick(gym.Env):
         returns next observation, achieved_goal
         '''
         obs, _, done, info = self.env_wrapper.step(action)
-        return obs, self.extract_eef_pos_from_obs(obs)
+        return obs, self.extract_can_pos_from_obs(obs)
 
     def reset(self):
         '''
@@ -93,6 +93,9 @@ class PickPlaceGoalPick(gym.Env):
 
     def extract_eef_pos_from_obs(self, obs):
         return obs[35:38]
+
+    def extract_can_pos_from_obs(self, obs):
+        return obs[:3]
 
     def get_reward_fn(self):
         return self.calc_reward_pick
