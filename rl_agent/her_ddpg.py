@@ -50,7 +50,8 @@ class CriticNetwork(nn.Module):
 
 class DDPGHERAgent:
     def __init__(self, env, obs_dim, action_dim, goal_dim, episode_len=200, update_iterations=4,
-        batch_size=256, actor_lr = 1e-3, critic_lr = 1e-3, descr='', results_dir='./results', normalize_data=True) -> None:
+        batch_size=256, actor_lr = 1e-3, critic_lr = 1e-3, descr='', results_dir='./results', 
+        normalize_data=True, checkpoint_dir=None) -> None:
         self.env = env
         self.obs_dim = obs_dim
         self.action_dim = action_dim
@@ -68,6 +69,9 @@ class DDPGHERAgent:
         self.critic_target = CriticNetwork(self.obs_dim, self.action_dim, self.goal_dim)
         self.critic_target.load_state_dict(self.critic.state_dict())
         self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=critic_lr)
+
+        if checkpoint_dir is not None:
+            self._load_from(checkpoint_dir)
 
         self.update_iterations = update_iterations
         self.batch_size = batch_size
@@ -94,16 +98,18 @@ class DDPGHERAgent:
 
     def rollout(self, episodes = 10, steps = 250):
         for ep in range(episodes):
-            obs = self.env.reset()
+            obs, goal = self.env.reset()
             t = 0
             done = False
             ep_return = 0
             while not done and t < steps:
-                obs = torch.FloatTensor(obs).to(device)
-                action = self.actor(obs)
+                obs_goal_torch = torch.FloatTensor(np.concatenate((obs, goal))).to(device)
+                action = self.actor(obs_goal_torch)
                 action_dateched = action.cpu().detach().numpy()\
                     .clip(self.env.action_space.low, self.env.action_space.high)
-                next_obs, reward, done, _ = self.env.step(action_dateched)
+                next_obs, achieved_goal = self.env.step(action_dateched)
+                reward = self.env.calc_reward_reach(achieved_goal, goal)
+                done = (reward == 0)
                 obs = next_obs
                 t += 1
                 ep_return += reward
@@ -226,6 +232,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('-r', '--results_dir', default='./results', 
         help='Directory which will hold the results of the experiments')
+    parser.add_argument('-chkp', '--checkpoint', default=None,
+        help='Checkpoint dir to load model from, should contain *.pth files')
     parser.add_argument('-alr', '--actor-lr', default=1e-3)
     parser.add_argument('-clr', '--critic-lr', default=1e-3)
     parser.add_argument('--epochs', default=1000, type=int)
@@ -242,7 +250,7 @@ def main():
     env_cfg['pick_only'] = True
     env_cfg['horizon'] = 150
     env_cfg['initialization_noise'] = None
-    # env_cfg['has_renderer'] = True
+    env_cfg['has_renderer'] = True
     env = PickPlaceGoalPick(env_config=env_cfg)
     agent = DDPGHERAgent(env=env, obs_dim=env.obs_dim, 
         episode_len=150,
@@ -253,6 +261,7 @@ def main():
         results_dir=args.results_dir, 
         normalize_data=args.normalize,
         update_iterations=int(args.update_it),
+        checkpoint_dir=args.checkpoint,
         descr='HER')
     agent.train(epochs=int(args.epochs), 
         iterations_per_epoch=int(args.it_per_epoch), 

@@ -51,12 +51,20 @@ class PickPlaceGoalPick(gym.Env):
         y = np.random.uniform(low=target_y-y_range, high=target_y+y_range)
         return np.array([x,y,target_z])
 
-    def generate_goal_pick(self):
+    def generate_goal_pick_old(self):
         rs_env = self.env_wrapper.gym_env.env
         obj_pos = rs_env.sim.data.body_xpos[rs_env.obj_body_id['Can']]
         x = np.random.uniform(low=obj_pos[0], high=obj_pos[0] + 0.005)
         y = np.random.uniform(low=obj_pos[1], high=obj_pos[1] + 0.005)
         z = np.random.uniform(low=obj_pos[2], high=obj_pos[2] + 0.002)
+        return np.array([x,y,z])
+    
+    def generate_goal_pick(self):
+        rs_env = self.env_wrapper.gym_env.env
+        obj_pos = rs_env.sim.data.body_xpos[rs_env.obj_body_id['Can']]
+        x = np.random.uniform(low=obj_pos[0], high=obj_pos[0] + 0.005)
+        y = np.random.uniform(low=obj_pos[1], high=obj_pos[1] + 0.005)
+        z = np.random.uniform(low=obj_pos[2] + 0.1, high=obj_pos[2] + 0.3)
         return np.array([x,y,z])
 
     def calc_reward_can(self, state_goal):
@@ -69,10 +77,15 @@ class PickPlaceGoalPick(gym.Env):
         return 1.0 if goal_reached else 0.0
 
     @staticmethod
-    def calc_reward_reach(achieved_goal, desired_goal):
+    def calc_reward_reach_old(achieved_goal, desired_goal):
         goal_reached = np.abs(achieved_goal[0] - desired_goal[0]) < 0.02 \
             and np.abs(achieved_goal[1] - desired_goal[1]) < 0.02        \
             and np.abs(achieved_goal[2] - desired_goal[2]) < 0.02
+        return 0.0 if goal_reached else -1.0
+
+    @staticmethod
+    def calc_reward_pick(achieved_goal, desired_goal):
+        goal_reached = np.abs(achieved_goal[2] - desired_goal[2]) < 0.02
         return 0.0 if goal_reached else -1.0
 
     def render(self):
@@ -82,7 +95,7 @@ class PickPlaceGoalPick(gym.Env):
         return obs[35:38]
 
     def get_reward_fn(self):
-        return self.calc_reward_reach
+        return self.calc_reward_pick
 
     @property
     def action_dim(self):
@@ -122,7 +135,7 @@ def inspect_observations(visualize = False):
                 else:
                     action = acts[t]
                 obs, achieved_goal = env.step(action)
-                reward = env.calc_reward_reach(achieved_goal, goal)
+                reward = env.calc_reward_pick(achieved_goal, goal)
                 done = reward == 0.0
                 print(f"Reward {reward}")
                 ep_return += reward
