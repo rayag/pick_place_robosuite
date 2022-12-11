@@ -5,8 +5,8 @@ import numpy as np
 import h5py
 import time
 
-DEMO_PATH = "/home/raya/uni/ray_test/data/demo/low_dim.hdf5"
-GRABBED_PATH = "/home/raya/uni/ray_test/data/states/can-grabbed/data.hdf5"
+DEMO_PATH = "./demo/low_dim.hdf5"
+GRABBED_PATH = "./data/can-grabbed/data.hdf5"
 
 def put_states_in_file():
     '''
@@ -14,7 +14,6 @@ def put_states_in_file():
     '''
     env_cfg = PICK_PLACE_DEFAULT_ENV_CFG
     env_cfg['pick_only'] = True
-    env_cfg['has_renderer'] = True
     env = PickPlaceWrapper()
     with h5py.File(DEMO_PATH, "r") as f:
         with h5py.File(GRABBED_PATH, "r+") as g:
@@ -33,19 +32,21 @@ def put_states_in_file():
                     action = acts[t]
                     _, _, done, _ = env.step(action)
                     if done:
-                        print(f"Putting state {states[t]}")
-                        j = j + 1
+                        del g[f"states/{j}"]
                         g.create_dataset(f"states/{j}", data=np.array(states[t]))
+                        j = j + 1
                     t = t+1
 
 def get_states_grabbed_can():
     with h5py.File(GRABBED_PATH, "r+") as g:
         states = list(g["states"].keys())
+        print(states)
         assert len(states) > 0
         first_state = g["states/0"]
-        states_np = np.zeros(shape=(len(states), first_state.shape[1]))
+        print(first_state)
+        states_np = np.zeros(shape=(len(states), first_state.shape[0]))
         for i in range(len(states)):
-            state = g[f"states/{i}"][()][0]
+            state = g[f"states/{i}"][()]
             states_np[i] = state
         return states_np
 
@@ -74,10 +75,12 @@ class PickPlaceGrabbedCan(PickPlaceWrapper):
 def main():
     # put_states_in_file()
     cfg = PICK_PLACE_DEFAULT_ENV_CFG
-    # cfg['has_renderer'] = True
+    cfg['has_renderer'] = True
     env = PickPlaceGrabbedCan()
-    env.reset()
-    env.print_state()
+    for i in range(10):
+        env.reset()
+        env.render()
+        time.sleep(5)
     
 
 if __name__ == "__main__":

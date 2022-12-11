@@ -13,6 +13,7 @@ vis/__pycache__/*
 logger/__pycache__/*
 config/__pycache__/*
 demo/
+data/
 video/
 *.pth
 .vscode/

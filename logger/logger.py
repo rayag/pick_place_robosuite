@@ -30,7 +30,7 @@ class ProgressLogger:
 
     def print_and_log_output(self, output):
         print(output)
-        with open(self.output_file_path, 'w+') as f:
+        with open(self.output_file_path, 'a') as f:
             f.write(output + "\n")
 
     def print_last_ten_runs_stat(self, current_iteration):

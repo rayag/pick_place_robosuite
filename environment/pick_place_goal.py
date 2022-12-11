@@ -6,6 +6,19 @@ import h5py
 import numpy as np
 import time
 
+GRABBED_PATH = "./data/can-grabbed/data.hdf5"
+
+def get_states_grabbed_can():
+    with h5py.File(GRABBED_PATH, "r+") as g:
+        states = list(g["states"].keys())
+        assert len(states) > 0
+        first_state = g["states/0"]
+        states_np = np.zeros(shape=(len(states), first_state.shape[0]))
+        for i in range(len(states)):
+            state = g[f"states/{i}"][()]
+            states_np[i] = state
+        return states_np
+
 class PickPlaceGoalPick(gym.Env):
     def __init__(self, env_config=PICK_PLACE_DEFAULT_ENV_CFG) -> None:
         super().__init__()
@@ -15,6 +28,8 @@ class PickPlaceGoalPick(gym.Env):
         self.action_space = self.env_wrapper.gym_env.action_space
         self.env_wrapper.pick_only = True
         self.goal = None
+        self.states_grabbed_can = get_states_grabbed_can()
+        self.p = 0.5 # TODO: add this as an env config
 
     def step(self, action):
         '''
@@ -27,6 +42,10 @@ class PickPlaceGoalPick(gym.Env):
         '''
         return observation, desired goal
         '''
+        prob = np.random.uniform()
+        if prob < self.p:
+            return self.reset_to(self.states_grabbed_can[np.random.randint(0, self.states_grabbed_can.shape[0])])
+
         obs = self.env_wrapper.reset()
         self.goal = self.generate_goal_pick()
         return obs, self.goal

@@ -65,11 +65,13 @@ class PickPlaceWrapper(gym.Env):
         obs, reward, done, info = self.gym_env.step(action=action)
         if self.pick_only:
             reach, grasp, _, _ = self.gym_env.env.staged_rewards()
+            done = False
             if grasp > 0:
                 reward = 1
+                done = True
             else:
                 reward = 20 * reach - 1
-            return obs, reward, reward==1, info
+            return obs, reward, done, info
         return obs, reward, done, info
 
     def action_dim(self):
