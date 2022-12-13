@@ -5,6 +5,7 @@ import gym
 import h5py
 import numpy as np
 import time
+from mpi4py import MPI
 
 GRABBED_PATH = "./data/can-grabbed/data.hdf5"
 
@@ -28,8 +29,11 @@ class PickPlaceGoalPick(gym.Env):
         self.action_space = self.env_wrapper.gym_env.action_space
         self.env_wrapper.pick_only = True
         self.goal = None
-        self.states_grabbed_can = get_states_grabbed_can()
-        self.p = 0.5 # TODO: add this as an env config
+        if MPI.COMM_WORLD.Get_rank() == 0: # TODO: allow this for all processes
+            self.states_grabbed_can = get_states_grabbed_can()
+            self.p =  1# TODO: add this as an env config
+        else:
+            self.p = 0
 
     def step(self, action):
         '''
@@ -83,7 +87,7 @@ class PickPlaceGoalPick(gym.Env):
         obj_pos = rs_env.sim.data.body_xpos[rs_env.obj_body_id['Can']]
         x = np.random.uniform(low=obj_pos[0], high=obj_pos[0] + 0.005)
         y = np.random.uniform(low=obj_pos[1], high=obj_pos[1] + 0.005)
-        z = np.random.uniform(low=obj_pos[2] + 0.1, high=obj_pos[2] + 0.3)
+        z = np.random.uniform(low=obj_pos[2] + 0.05, high=obj_pos[2] + 0.1)
         return np.array([x,y,z])
 
     def calc_reward_can(self, state_goal):
@@ -117,7 +121,7 @@ class PickPlaceGoalPick(gym.Env):
         return obs[:3]
 
     def get_reward_fn(self):
-        return self.calc_reward_pick
+        return self.calc_reward_reach_old
 
     @property
     def action_dim(self):
@@ -154,12 +158,13 @@ def inspect_observations(visualize = False):
             while t < acts.shape[0]:
                 if done:
                     action = np.zeros(shape=(acts.shape[1]))
+                    action[-1] = 1
                 else:
                     action = acts[t]
                 obs, achieved_goal = env.step(action)
                 reward = env.calc_reward_pick(achieved_goal, goal)
                 done = reward == 0.0
-                print(f"Reward {reward}")
+                print(f"Reward {reward} DG {goal} AG {achieved_goal}")
                 ep_return += reward
                 t = t + 1
                 if visualize:
@@ -171,7 +176,6 @@ def main():
     # cfg['has_renderer'] = True
     # cfg['initialization_noise'] = 'default'
     # env = PickPlaceGoalPick()
-    # rb = SimpleReplayBuffer(env.obs_dim() + env.goal_dim, env.action_dim(), 100)
     # for i in range(10):
     #     env.reset()
     #     env.render()
