@@ -14,7 +14,10 @@ def put_states_in_file():
     '''
     env_cfg = PICK_PLACE_DEFAULT_ENV_CFG
     env_cfg['pick_only'] = True
-    env = PickPlaceWrapper()
+    env = PickPlaceWrapper(env_config=env_cfg)
+    env1_cfg = env_cfg.copy()
+    env1_cfg['has_renderer']=True
+    env1 = PickPlaceWrapper(env_config=env1_cfg)
     with h5py.File(DEMO_PATH, "r") as f:
         with h5py.File(GRABBED_PATH, "r+") as g:
             demos = list(f['data'].keys())
@@ -34,6 +37,7 @@ def put_states_in_file():
                     if done:
                         del g[f"states/{j}"]
                         g.create_dataset(f"states/{j}", data=np.array(states[t]))
+                        time.sleep(4)
                         j = j + 1
                     t = t+1
 
@@ -64,7 +68,12 @@ class PickPlaceGrabbedCan(PickPlaceWrapper):
         prob = np.random.uniform()
         if prob >= self.p:
             rand_idx = np.random.randint(0, self.predefined_states.shape[0])
-            return super().reset_to(self.predefined_states[rand_idx])
+            super().reset_to(self.predefined_states[rand_idx])
+            action = np.zeros(shape=(self.action_dim()))
+            action[-1]=1
+            self.step(action)
+            self.step(action)
+            return self.step(action/2)
         return super().reset()
 
     def print_state(self):

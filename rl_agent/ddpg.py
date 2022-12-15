@@ -71,12 +71,12 @@ class DDPGAgent:
         self.actor = ActorNetwork(obs_dim=self.obs_dim, action_dim=self.action_dim)
         self.actor_target = ActorNetwork(obs_dim=self.obs_dim, action_dim=self.action_dim)
         self.actor_target.load_state_dict(self.actor.state_dict())
-        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=1e-6)
+        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=1e-5)
 
         self.critic = CriticNetwork(self.obs_dim, self.action_dim)
         self.critic_target = CriticNetwork(self.obs_dim, self.action_dim)
         self.critic_target.load_state_dict(self.critic.state_dict())
-        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=1e-5)
+        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=1e-4)
 
         self.update_iterations = update_iterations
         self.batch_size = batch_size
@@ -102,7 +102,7 @@ class DDPGAgent:
         if use_experience:
             self.replay_buffer.load_examples_from_file(demo_dir)
 
-    def rollout(self, episodes = 20, steps = 250):
+    def rollout(self, episodes = 10, steps = 250):
         for ep in range(episodes):
             obs = self.env.reset()
             t = 0

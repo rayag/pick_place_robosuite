@@ -21,19 +21,14 @@ def get_states_grabbed_can():
         return states_np
 
 class PickPlaceGoalPick(gym.Env):
-    def __init__(self, env_config=PICK_PLACE_DEFAULT_ENV_CFG) -> None:
+    def __init__(self, env_config=PICK_PLACE_DEFAULT_ENV_CFG, p=1) -> None:
         super().__init__()
         self.env_wrapper = PickPlaceWrapper(env_config=env_config)
         self.goal_dim = 3 # coordinates of the object
         self.observation_space = self.env_wrapper.gym_env.observation_space
         self.action_space = self.env_wrapper.gym_env.action_space
-        self.env_wrapper.pick_only = True
         self.goal = None
-        if MPI.COMM_WORLD.Get_rank() == 0: # TODO: allow this for all processes
-            self.states_grabbed_can = get_states_grabbed_can()
-            self.p =  1# TODO: add this as an env config
-        else:
-            self.p = 0
+        self.p = p
 
     def step(self, action):
         '''
@@ -46,21 +41,14 @@ class PickPlaceGoalPick(gym.Env):
         '''
         return observation, desired goal
         '''
-        prob = np.random.uniform()
-        if prob < self.p:
-            return self.reset_to(self.states_grabbed_can[np.random.randint(0, self.states_grabbed_can.shape[0])])
-
-        obs = self.env_wrapper.reset()
         self.goal = self.generate_goal_pick()
-        return obs, self.goal
+        return self.env_wrapper.reset(), self.goal
 
     def reset_to(self, state):
         '''
         return observation, desired goal
         '''
-        obs = self.env_wrapper.reset_to(state=state)
-        self.goal = self.generate_goal_pick()
-        return obs, self.goal
+        return self.env_wrapper.reset_to(state), self.goal
     
     def generate_goal_can(self):
         CAN_IDX = 3 # TODO: make this work for all objects
@@ -85,9 +73,16 @@ class PickPlaceGoalPick(gym.Env):
     def generate_goal_pick(self):
         rs_env = self.env_wrapper.gym_env.env
         obj_pos = rs_env.sim.data.body_xpos[rs_env.obj_body_id['Can']]
-        x = np.random.uniform(low=obj_pos[0], high=obj_pos[0] + 0.005)
-        y = np.random.uniform(low=obj_pos[1], high=obj_pos[1] + 0.005)
-        z = np.random.uniform(low=obj_pos[2] + 0.05, high=obj_pos[2] + 0.1)
+        x = np.random.uniform(low=np.max([rs_env.bin1_pos[0], obj_pos[0] - 0.1]), 
+            high=np.min([rs_env.bin1_pos[0] + rs_env.bin_size[0] - 0.1, obj_pos[0] + 0.1]))
+        y = np.random.uniform(low=np.max([rs_env.bin1_pos[1], obj_pos[1] - 0.1]), 
+            high=np.min([rs_env.bin1_pos[1] + rs_env.bin_size[1] - 0.1, obj_pos[1] + 0.1]))
+        # sometimes the goal should be on the table
+        prob = np.random.rand()
+        if (prob < self.p):
+            z = obj_pos[2]
+        else:
+            z = np.random.uniform(low=obj_pos[2] + 0.005, high=obj_pos[2] + 0.1)
         return np.array([x,y,z])
 
     def calc_reward_can(self, state_goal):
@@ -100,15 +95,10 @@ class PickPlaceGoalPick(gym.Env):
         return 1.0 if goal_reached else 0.0
 
     @staticmethod
-    def calc_reward_reach_old(achieved_goal, desired_goal):
+    def calc_reward_pick(achieved_goal, desired_goal):
         goal_reached = np.abs(achieved_goal[0] - desired_goal[0]) < 0.02 \
             and np.abs(achieved_goal[1] - desired_goal[1]) < 0.02        \
             and np.abs(achieved_goal[2] - desired_goal[2]) < 0.02
-        return 0.0 if goal_reached else -1.0
-
-    @staticmethod
-    def calc_reward_pick(achieved_goal, desired_goal):
-        goal_reached = np.abs(achieved_goal[2] - desired_goal[2]) < 0.02
         return 0.0 if goal_reached else -1.0
 
     def render(self):
@@ -121,7 +111,7 @@ class PickPlaceGoalPick(gym.Env):
         return obs[:3]
 
     def get_reward_fn(self):
-        return self.calc_reward_reach_old
+        return self.calc_reward_pick
 
     @property
     def action_dim(self):
