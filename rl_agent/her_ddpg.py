@@ -2,6 +2,7 @@ from environment.pick_place_goal import PickPlaceGoalPick
 from environment.pick_place_wrapper import PICK_PLACE_DEFAULT_ENV_CFG
 from logger.logger import ProgressLogger
 from replay_buffer.her_replay_buffer import HERReplayBuffer
+from replay_buffer.normalizer import Normalizer
 
 from mpi4py import MPI
 from torch import nn
@@ -13,7 +14,8 @@ import datetime
 import os
 import argparse
 import time
-import threading    
+import threading
+import h5py
 
 device = 'cpu'#torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -22,37 +24,41 @@ class ActorNetwork(nn.Module):
         super(ActorNetwork, self).__init__()
         self.action_high = action_high
         self.action_low = action_low
-        self.input = nn.Linear(obs_dim, 256).to(device) #TODO: allow custom layer sizes
-        self.h1 = nn.Linear(256, 256).to(device)
-        self.h2 = nn.Linear(256, 256).to(device)
-        self.output = nn.Linear(256, action_dim).to(device)
+        self.input = nn.Linear(obs_dim, 64).to(device) #TODO: allow custom layer sizes
+        self.h1 = nn.Linear(64, 64).to(device)
+        self.h2 = nn.Linear(64, 64).to(device)
+        self.h3 = nn.Linear(64,64).to(device)
+        self.output = nn.Linear(64, action_dim).to(device)
 
     def forward(self, obs):
         x = F.relu(self.input(obs))
         x = F.relu(self.h1(x))
         x = F.relu(self.h2(x))
+        x = F.relu(self.h3(x))
         action = torch.tanh(self.output(x)) * torch.FloatTensor(self.action_high)
         return action
 
 class CriticNetwork(nn.Module):
     def __init__(self, obs_dim, action_dim, goal_dim) -> None:
         super().__init__()
-        self.input = nn.Linear(obs_dim + goal_dim + action_dim, 256).to(device)
-        self.h1 = nn.Linear(256, 256).to(device)
-        self.h2 = nn.Linear(256, 256).to(device)
-        self.output = nn.Linear(256, 1).to(device)
+        self.input = nn.Linear(obs_dim + goal_dim + action_dim, 64).to(device)
+        self.h1 = nn.Linear(64, 64).to(device)
+        self.h2 = nn.Linear(64, 64).to(device)
+        self.h3 = nn.Linear(64,64).to(device)
+        self.output = nn.Linear(64, 1).to(device)
 
     def forward(self, sg, a):
         x = F.relu(self.input(torch.cat([sg, a], 1)))
         x = F.relu(self.h1(x))
         x = F.relu(self.h2(x))
+        x = F.relu(self.h3(x))
         out = self.output(x)
         return out
 
 class DDPGHERAgent:
     def __init__(self, env: PickPlaceGoalPick, env_cfg: any,  obs_dim: int, action_dim: int, goal_dim: int, 
         episode_len: int=200, update_iterations: int=4, batch_size: int=256, actor_lr :float=1e-3, 
-        critic_lr: float = 1e-3, descr: str='', results_dir: str='./results', 
+        critic_lr: float = 1e-3, input_clip_range: float=5, descr: str='', results_dir: str='./results', 
         normalize_data: bool=True, checkpoint_dir: str=None) -> None:
         self.env = env
         self.env_cfg = env_cfg
@@ -62,9 +68,11 @@ class DDPGHERAgent:
         self.episode_len = episode_len
         self.lock = threading.Lock()
         self.proc_count = MPI.COMM_WORLD.Get_size()
-        
 
-        self.init_replay_buffer(episode_len, env.get_reward_fn(), normalize_data)
+        self.obs_normalizer = Normalizer(self.obs_dim, clip_range=input_clip_range)
+        self.goal_normalizer = Normalizer(self.goal_dim, clip_range=input_clip_range)
+
+        self.init_replay_buffer(episode_len, env.get_reward_fn(), normalize_data, input_clip_range,self.obs_normalizer, self.goal_normalizer)
         self.reward_fn = env.get_reward_fn()
 
         self.actor = ActorNetwork(obs_dim=self.obs_dim + self.goal_dim, action_dim=self.action_dim, 
@@ -87,7 +95,8 @@ class DDPGHERAgent:
         self.update_iterations = update_iterations
         self.batch_size = batch_size
         self.gamma = 0.98
-        self.polyak = 0.995
+        self.polyak = 0.95
+        self.clip_return = 1. / (1. - self.gamma)
 
         date_str = datetime.datetime.today().strftime('%Y-%m-%d-%H-%M-%S')
         self.path = os.path.join(results_dir, "DDPG-" + descr + "-" + date_str)
@@ -98,7 +107,7 @@ class DDPGHERAgent:
                 os.makedirs(self.path)
         self.logger = ProgressLogger(self.path)
 
-    def init_replay_buffer(self, episode_len, reward_fn, normalize_data):
+    def init_replay_buffer(self, episode_len, reward_fn, normalize_data, input_clip_range, obs_normalizer, goal_normalizer):
         self.replay_buffer = HERReplayBuffer(capacity=int(1e6), 
             episode_len=episode_len, 
             action_dim=self.action_dim, 
@@ -107,6 +116,9 @@ class DDPGHERAgent:
             k=4,
             sample_strategy=None,
             reward_fn=reward_fn,
+            input_clip_range=input_clip_range,
+            obs_normalizer=obs_normalizer,
+            goal_normalizar=goal_normalizer,
             normalize_data=normalize_data)
 
     def rollout(self, episodes = 10, steps = 250):
@@ -154,13 +166,16 @@ class DDPGHERAgent:
                     reward = 0
                     success = False
                     for t in range(self.episode_len):
-                        obs_goal_torch = torch.FloatTensor(np.concatenate((obs, goal))).to(device)
+                        obs_norm = np.squeeze(self.obs_normalizer.normalize(obs))
+                        goal_norm = np.squeeze(self.goal_normalizer.normalize(goal))
+                        obs_goal_norm_torch = torch.FloatTensor(np.concatenate((obs_norm, goal_norm))).to(device)
                         p = np.random.rand()
                         if p < exploration_eps:
                             action_detached = np.random.uniform(size=self.action_dim, low=self.env.action_space.low, high=self.env.action_space.high)
                         else:
-                            action = self.actor(obs_goal_torch)
-                            action_detached = action.cpu().detach().numpy().clip(self.env.action_space.low, self.env.action_space.high)
+                            action = self.actor(obs_goal_norm_torch)
+                            action_detached = (action.cpu().detach().numpy()+np.random.normal(scale=0.05, size=self.action_dim))\
+                                .clip(self.env.action_space.low, self.env.action_space.high)
                         next_obs, achieved_goal = self.env.step(action_detached)
                         reward = self.reward_fn(achieved_goal, goal)
                         if not success and reward == 0:
@@ -180,7 +195,9 @@ class DDPGHERAgent:
                         complete_episodes += 1
                         iteration_success_count += 1
 
-                    self.replay_buffer.add(ep_obs, ep_actions, ep_next_obs, ep_rewards, ep_achieved_goals, ep_desired_goals)
+                    self.replay_buffer.add_episode(ep_obs, ep_actions, ep_next_obs, ep_rewards, ep_achieved_goals, ep_desired_goals)
+                self.obs_normalizer.sync_stats()
+                self.goal_normalizer.sync_stats()
                 actor_loss, critic_loss, value = self.update()
                 self.logger.add(reward, actor_loss, critic_loss, complete_episodes, value)
                 self._save(epoch * iterations_per_epoch + it)
@@ -206,7 +223,7 @@ class DDPGHERAgent:
 
             # Update critic network
             q_next_state = self.critic_target(torch.cat((next_state, desired_goal), 1), self.actor_target(torch.cat((next_state, desired_goal),1)))
-            target_q = reward + self.gamma * q_next_state.detach()
+            target_q = torch.clip((reward + self.gamma * q_next_state.detach()), min=-self.clip_return, max=0)
             q = self.critic(torch.cat((state, desired_goal), 1), action)
             critic_loss = nn.MSELoss()(q, target_q)
             self.critic_optimizer.zero_grad()
@@ -265,12 +282,21 @@ class DDPGHERAgent:
                 os.makedirs(checkpoint_path)
             torch.save(self.actor.state_dict(), os.path.join(checkpoint_path, 'actor_weights.pth'))
             torch.save(self.critic.state_dict(), os.path.join(checkpoint_path, 'critic_weights.pth'))
+            with h5py.File(os.path.join(checkpoint_path, 'normalizer_data.h5'), 'w') as f:
+                f.create_dataset('obs_norm_mean', data=self.obs_normalizer.mean)
+                f.create_dataset('obs_norm_std', data=self.obs_normalizer.std)
+                f.create_dataset('goal_norm_mean', data=self.goal_normalizer.mean)
+                f.create_dataset('goal_norm_std', data=self.goal_normalizer.std)
 
     def _load_from(self, path):
         if os.path.exists(path):
             print(f"Loading from {path} device {device}")
             self.actor.load_state_dict(torch.load(os.path.join(path, 'actor_weights.pth'), map_location=device))
             self.critic.load_state_dict(torch.load(os.path.join(path, 'critic_weights.pth'), map_location=device))
+            with h5py.File(os.path.join(path, 'normalizer_data.h5'), 'r') as f:
+                print(f['obs_norm_mean'])
+                self.obs_normalizer.set_mean_std(f['obs_norm_mean'], f['obs_norm_std'])
+                self.goal_normalizer.set_mean_std(f['goal_norm_mean'], f['goal_norm_std'])
     
     @staticmethod
     def _sync_network_parameters(net):
@@ -297,6 +323,12 @@ class DDPGHERAgent:
             p.grad.copy_(torch.Tensor(values).view_as(p.data))
             pos += p.numel()
 
+def set_random_seeds(seed, env):
+    # each worker should have a different seed
+    worker_seed = seed + MPI.COMM_WORLD.Get_rank()
+    env.set_seed(worker_seed)
+    np.random.seed(worker_seed)
+    torch.manual_seed(seed)
 
 def main():    
     # TODO: remove
@@ -308,38 +340,56 @@ def main():
     parser.add_argument('-alr', '--actor-lr', default=1e-3)
     parser.add_argument('-clr', '--critic-lr', default=1e-3)
     parser.add_argument('--epochs', default=1000, type=int)
-    parser.add_argument('--it_per_epoch', default=100, type=int)
+    parser.add_argument('--it_per_epoch', default=50, type=int)
     parser.add_argument('--ep_per_it', default=16)
     parser.add_argument('--exp_eps', default=0, type=float)
-    parser.add_argument('--normalize', action='store_true', default=False)
+    parser.add_argument('--normalize', action='store_true', default=True)
     parser.add_argument('--update_it', default=40)
     parser.add_argument('--k', default=4)
+    parser.add_argument('--seed', default=59, help="Random seed")
+    parser.add_argument('-a', '--action', choices=['train', 'rollout'], default='train')
     args = parser.parse_args()
-    print(f"Actor alpha {args.actor_lr}, Critic alpha {args.critic_lr}")
+    print(f"Actor alpha {args.actor_lr}, Critic alpha {args.critic_lr} Normalize {args.normalize}")
 
     env_cfg = PICK_PLACE_DEFAULT_ENV_CFG
     env_cfg['pick_only'] = True
     env_cfg['horizon'] = 150
     env_cfg['initialization_noise'] = None
-    # env_cfg['has_renderer'] = True
-    env = PickPlaceGoalPick(env_config=env_cfg, p=0.5)
-
-    agent = DDPGHERAgent(env=env, env_cfg=env_cfg, obs_dim=env.obs_dim, 
-        episode_len=150,
-        action_dim=env.action_dim, 
-        goal_dim=env.goal_dim, 
-        actor_lr=float(args.actor_lr), 
-        critic_lr=float(args.critic_lr), 
-        results_dir=args.results_dir, 
-        normalize_data=args.normalize,
-        update_iterations=int(args.update_it),
-        checkpoint_dir=args.checkpoint,
-        descr='HER')
-    agent.train(epochs=int(args.epochs), 
-        iterations_per_epoch=int(args.it_per_epoch), 
-        episodes_per_iter=int(args.ep_per_it), 
-        exploration_eps=float(args.exp_eps), 
-        future_goals=int(args.k))
+    
+    if args.action == 'train':
+        env = PickPlaceGoalPick(env_config=env_cfg, p=0.5)
+        set_random_seeds(args.seed, env)
+        agent = DDPGHERAgent(env=env, env_cfg=env_cfg, obs_dim=env.obs_dim, 
+            episode_len=150,
+            action_dim=env.action_dim, 
+            goal_dim=env.goal_dim, 
+            actor_lr=float(args.actor_lr), 
+            critic_lr=float(args.critic_lr), 
+            results_dir=args.results_dir, 
+            normalize_data=args.normalize,
+            update_iterations=int(args.update_it),
+            checkpoint_dir=args.checkpoint,
+            descr='HER')
+        agent.train(epochs=int(args.epochs), 
+            iterations_per_epoch=int(args.it_per_epoch), 
+            episodes_per_iter=int(args.ep_per_it), 
+            exploration_eps=float(args.exp_eps), 
+            future_goals=int(args.k))
+    elif args.action == 'rollout':
+        env_cfg['has_renderer'] = True
+        env = PickPlaceGoalPick(env_config=env_cfg, p=0.5)
+        agent = DDPGHERAgent(env=env, env_cfg=env_cfg, obs_dim=env.obs_dim, 
+            episode_len=150,
+            action_dim=env.action_dim, 
+            goal_dim=env.goal_dim, 
+            actor_lr=float(args.actor_lr), 
+            critic_lr=float(args.critic_lr), 
+            results_dir=args.results_dir, 
+            normalize_data=args.normalize,
+            update_iterations=int(args.update_it),
+            checkpoint_dir=args.checkpoint,
+            descr='HER')
+        agent.rollout(steps=150)
 
 if __name__ == '__main__':
     main()

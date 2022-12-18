@@ -21,9 +21,10 @@ def get_states_grabbed_can():
         return states_np
 
 class PickPlaceGoalPick(gym.Env):
-    def __init__(self, env_config=PICK_PLACE_DEFAULT_ENV_CFG, p=1) -> None:
+    def __init__(self, env_config=PICK_PLACE_DEFAULT_ENV_CFG, seed=None, p=1) -> None:
         super().__init__()
         self.env_wrapper = PickPlaceWrapper(env_config=env_config)
+        self.env_wrapper.gym_env.seed(seed)
         self.goal_dim = 3 # coordinates of the object
         self.observation_space = self.env_wrapper.gym_env.observation_space
         self.action_space = self.env_wrapper.gym_env.action_space
@@ -41,14 +42,17 @@ class PickPlaceGoalPick(gym.Env):
         '''
         return observation, desired goal
         '''
-        self.goal = self.generate_goal_pick()
-        return self.env_wrapper.reset(), self.goal
+        obs = self.env_wrapper.reset()
+        self.goal = self.generate_goal_pick(obs)
+        return obs, self.goal
 
     def reset_to(self, state):
         '''
         return observation, desired goal
         '''
-        return self.env_wrapper.reset_to(state), self.goal
+        obs = self.env_wrapper.reset_to(state)
+        self.goal = self.generate_goal_pick(obs)
+        return obs, self.goal
     
     def generate_goal_can(self):
         CAN_IDX = 3 # TODO: make this work for all objects
@@ -70,19 +74,18 @@ class PickPlaceGoalPick(gym.Env):
         z = np.random.uniform(low=obj_pos[2], high=obj_pos[2] + 0.002)
         return np.array([x,y,z])
     
-    def generate_goal_pick(self):
+    def generate_goal_pick(self, obs):
         rs_env = self.env_wrapper.gym_env.env
         obj_pos = rs_env.sim.data.body_xpos[rs_env.obj_body_id['Can']]
-        x = np.random.uniform(low=np.max([rs_env.bin1_pos[0], obj_pos[0] - 0.1]), 
-            high=np.min([rs_env.bin1_pos[0] + rs_env.bin_size[0] - 0.1, obj_pos[0] + 0.1]))
-        y = np.random.uniform(low=np.max([rs_env.bin1_pos[1], obj_pos[1] - 0.1]), 
-            high=np.min([rs_env.bin1_pos[1] + rs_env.bin_size[1] - 0.1, obj_pos[1] + 0.1]))
+        gripper_pos = self.extract_eef_pos_from_obs(obs)
+        x = gripper_pos[0] + np.random.uniform(low=-0.15, high=0.15)
+        y = gripper_pos[1] + np.random.uniform(low=-0.1, high=0.1)
         # sometimes the goal should be on the table
         prob = np.random.rand()
         if (prob < self.p):
             z = obj_pos[2]
         else:
-            z = np.random.uniform(low=obj_pos[2] + 0.005, high=obj_pos[2] + 0.1)
+            z = obj_pos[2] + np.random.uniform(low=0.005, high=0.1)
         return np.array([x,y,z])
 
     def calc_reward_can(self, state_goal):
@@ -96,9 +99,7 @@ class PickPlaceGoalPick(gym.Env):
 
     @staticmethod
     def calc_reward_pick(achieved_goal, desired_goal):
-        goal_reached = np.abs(achieved_goal[0] - desired_goal[0]) < 0.02 \
-            and np.abs(achieved_goal[1] - desired_goal[1]) < 0.02        \
-            and np.abs(achieved_goal[2] - desired_goal[2]) < 0.02
+        goal_reached = np.linalg.norm(achieved_goal - desired_goal, axis=-1) < 0.05
         return 0.0 if goal_reached else -1.0
 
     def render(self):
@@ -112,6 +113,9 @@ class PickPlaceGoalPick(gym.Env):
 
     def get_reward_fn(self):
         return self.calc_reward_pick
+    
+    def set_seed(self, seed):
+        self.env_wrapper.gym_env.seed(seed)
 
     @property
     def action_dim(self):
@@ -127,12 +131,14 @@ DEMO_PATH = "/home/rayageorgieva/uni/masters/pick_place_robosuite/demo/low_dim.h
 def inspect_observations(visualize = False):
     env_cfg = PICK_PLACE_DEFAULT_ENV_CFG
     env_cfg['pick_only'] = True
-    env_cfg['has_renderer'] = visualize
+    if visualize:
+        env_cfg['has_renderer'] = visualize
     env = PickPlaceGoalPick()
     with h5py.File(DEMO_PATH, "r+") as f:
         demos = list(f['data'].keys())
         print(f"Total episodes {len(demos)}")
         sum_steps = 0
+        dist = []
         for i in range(len(demos)):
             print(f"Episode {i} ...")
             ep = demos[i]
@@ -154,14 +160,20 @@ def inspect_observations(visualize = False):
                 obs, achieved_goal = env.step(action)
                 reward = env.calc_reward_pick(achieved_goal, goal)
                 done = reward == 0.0
-                print(f"Reward {reward} DG {goal} AG {achieved_goal}")
+                eef_pod = env.extract_eef_pos_from_obs(obs)
+                can_pos = env.extract_can_pos_from_obs(obs)
+                touching = np.linalg.norm(eef_pod - can_pos) < 0.02
+                if touching:
+                    dist.append(eef_pod - can_pos)
+                # print(f"Reward {reward} DG {goal} AG {achieved_goal} Distance: {(eef_pod, can_pos) if touching else '-'}")
                 ep_return += reward
                 t = t + 1
                 if visualize:
                     env.render()
-
+        dist = np.array(dist)
+        print(f"Mean dist: {np.mean(dist, axis=0)} Max: {np.max(dist, axis=0)}")
 def main():
-    inspect_observations(True)
+    inspect_observations(False)
     # cfg = PICK_PLACE_DEFAULT_ENV_CFG
     # cfg['has_renderer'] = True
     # cfg['initialization_noise'] = 'default'

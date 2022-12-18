@@ -10,7 +10,10 @@ class HERReplayBuffer:
         obs_dim: int, 
         goal_dim: int, 
         k: int, 
+        input_clip_range: int,
         sample_strategy: None, 
+        obs_normalizer: Normalizer,
+        goal_normalizar: Normalizer,
         reward_fn: any, normalize_data: bool = False) -> None:
         self.max_episodes = capacity // episode_len
         self.episode_len = episode_len
@@ -30,10 +33,11 @@ class HERReplayBuffer:
         self.achieved_goals = np.zeros([self.capacity, goal_dim], dtype=np.float32)
 
         self.normalize_data = normalize_data
-        self.obs_normalizer = Normalizer(dim=obs_dim)
-        self.goal_normalizer = Normalizer(dim=goal_dim)
+        self.input_clip_range = input_clip_range
+        self.obs_normalizer = obs_normalizer
+        self.goal_normalizer = goal_normalizar
         
-    def add(self, obs, actions, next_obs, rewards, achieved_goals, desired_goals):
+    def add_episode(self, obs, actions, next_obs, rewards, achieved_goals, desired_goals):
         assert obs.shape[0] == self.episode_len
         with self.lock:
             if self.normalize_data:
@@ -47,7 +51,7 @@ class HERReplayBuffer:
             self.desired_goals[self.it:self.it+self.episode_len] = desired_goals
             # update local sizes and iterators
             self.it = (self.it + self.episode_len) % self.capacity
-            self.size = min(self.size + self.episode_len, self.capacity)
+            self.size = min(self.size + self.episode_len, self.capacity)        
     
     def sample(self, batch_size):
         with self.lock:
@@ -67,12 +71,12 @@ class HERReplayBuffer:
                     rewards_tmp[abs_i] = self.reward_fn(self.achieved_goals[abs_i], self.achieved_goals[abs_fut_i])
 
             if self.normalize_data:
-                return self.obs_normalizer.normalize(self.obs[abs_indices]),   \
+                return self.obs_normalizer.normalize(np.clip(self.obs[abs_indices], a_min=-self.input_clip_range, a_max=self.input_clip_range)),   \
                     self.actions[abs_indices],                                 \
-                    self.obs_normalizer.normalize(self.next_obs[abs_indices]), \
+                    self.obs_normalizer.normalize(np.clip(self.next_obs[abs_indices], a_min=-self.input_clip_range, a_max=self.input_clip_range)), \
                     rewards_tmp[abs_indices],                                  \
-                    self.goal_normalizer.normalize(self.achieved_goals[abs_indices]), \
-                    self.goal_normalizer.normalize(self.achieved_goals[abs_fut_indices])
+                    self.goal_normalizer.normalize(np.clip(self.achieved_goals[abs_indices], a_min=-self.input_clip_range, a_max=self.input_clip_range)), \
+                    self.goal_normalizer.normalize(np.clip(self.achieved_goals[abs_fut_indices], a_min=-self.input_clip_range, a_max=self.input_clip_range))
             else:
                 return self.obs[abs_indices], self.actions[abs_indices], self.next_obs[abs_indices], \
                     rewards_tmp[abs_indices], self.achieved_goals[abs_indices], self.achieved_goals[abs_fut_indices]

@@ -59,7 +59,10 @@ class PickPlaceWrapper(gym.Env):
         self.gym_env.render()
 
     def get_state_dict(self):
-        return self.gym_env.env._get_observations()
+        return self.gym_env.env._get_observations(force_update=True)
+
+    def get_flat_obs(self):
+        self.gym_env._flatten_obs(self.get_state_dict())
 
     def step(self, action):
         obs, reward, done, info = self.gym_env.step(action=action)
