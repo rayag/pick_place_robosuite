@@ -70,7 +70,7 @@ def calc_percent(x, n = 100):
 
 def main():
     # visulize_from_progress_csv("/home/raya/ray_results/DDPG_PickPlaceGrabbedCan_2022-11-21_23-40-413uklke4y/progress.csv")
-    visualise_from_custom_progress_file("./results/DDPG-HER-2022-12-18-15-14-06")
+    visualise_from_custom_progress_file("./results/DDPG-HER-2022-12-18-17-34-27")
 
 if __name__ == "__main__":
     main()

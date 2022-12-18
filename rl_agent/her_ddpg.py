@@ -189,7 +189,6 @@ class DDPGHERAgent:
                         ep_desired_goals[t] = goal
 
                         obs = next_obs
-                        t += 1
                     if success:
                         epoch_success_count += 1
                         complete_episodes += 1

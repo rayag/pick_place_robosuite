@@ -42,7 +42,7 @@ class HERReplayBuffer:
         with self.lock:
             if self.normalize_data:
                 self.obs_normalizer.update_stats(obs)
-                self.goal_normalizer.update_stats(achieved_goals)
+                self.goal_normalizer.update_stats(desired_goals)
             self.obs[self.it:self.it+self.episode_len] = obs
             self.actions[self.it:self.it+self.episode_len] = actions
             self.next_obs[self.it:self.it+self.episode_len] = next_obs
