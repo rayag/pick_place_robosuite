@@ -116,6 +116,12 @@ class PickPlaceGoalPick(gym.Env):
 
     def get_reward_fn(self):
         return self.calc_reward_pick
+
+    def get_achieved_goal_from_obs(self, obs):
+        if self.move_object:
+            return self.extract_can_pos_from_obs(obs)
+        else:
+            return self.extract_eef_pos_from_obs(obs)
     
     def set_seed(self, seed):
         self.env_wrapper.gym_env.seed(seed)

@@ -161,11 +161,12 @@ class DDPGHERAgent:
             for it in range(iterations_per_epoch):
                 iteration_success_count = 0
                 it_start_time = time.time()
+                started_episodes = 0
                 for ep in range(episodes_per_iter//self.proc_count):
                     obs, goal = self.env.reset()
-                    if self.reward_fn(self.env.extract_can_pos_from_obs(obs), goal) == 0:
+                    if self.reward_fn(self.env.get_achieved_goal_from_obs(obs), goal) == 0:
                         continue # we discard episodes in which the goal has been satisfied
-                
+                    started_episodes += 1
                     ep_obs = np.zeros(shape=(self.episode_len, self.obs_dim))
                     ep_actions = np.zeros(shape=(self.episode_len, self.action_dim))
                     ep_next_obs = np.zeros(shape=(self.episode_len, self.obs_dim))
@@ -206,12 +207,13 @@ class DDPGHERAgent:
                         iteration_success_count += 1
 
                     self.replay_buffer.add_episode(ep_obs, ep_actions, ep_next_obs, ep_rewards, ep_achieved_goals, ep_desired_goals)
-                self.obs_normalizer.sync_stats()
-                self.goal_normalizer.sync_stats()
-                actor_loss, critic_loss, value = self.update()
-                self.logger.add(reward, actor_loss, critic_loss, complete_episodes, value)
-                self._save(epoch * iterations_per_epoch + it)
-                self.logger.print_and_log_output(f"Ep {epoch} It {it} Success rate: {iteration_success_count * 100.0 / (episodes_per_iter//self.proc_count)}%")
+                if started_episodes > 0: # if the goal is satisfied at the beginning, we do not start the episode
+                    self.obs_normalizer.sync_stats()
+                    self.goal_normalizer.sync_stats()
+                    actor_loss, critic_loss, value = self.update()
+                    self.logger.add(reward, actor_loss, critic_loss, complete_episodes, value)
+                    self._save(epoch * iterations_per_epoch + it)
+                    self.logger.print_and_log_output(f"Epoch {epoch} It {it} Success rate: {iteration_success_count * 100.0 / (episodes_per_iter//self.proc_count)}%")
             end_epoch = time.time()
             if MPI.COMM_WORLD.Get_rank() == 0:
                 success_rate_eval = self._evaluate()
