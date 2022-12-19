@@ -24,34 +24,30 @@ class ActorNetwork(nn.Module):
         super(ActorNetwork, self).__init__()
         self.action_high = action_high
         self.action_low = action_low
-        self.input = nn.Linear(obs_dim, 64).to(device) #TODO: allow custom layer sizes
-        self.h1 = nn.Linear(64, 64).to(device)
-        self.h2 = nn.Linear(64, 64).to(device)
-        self.h3 = nn.Linear(64,64).to(device)
-        self.output = nn.Linear(64, action_dim).to(device)
+        self.input = nn.Linear(obs_dim, 256).to(device) #TODO: allow custom layer sizes
+        self.h1 = nn.Linear(256, 256).to(device)
+        self.h2 = nn.Linear(256, 256).to(device)
+        self.output = nn.Linear(256, action_dim).to(device)
 
     def forward(self, obs):
         x = F.relu(self.input(obs))
         x = F.relu(self.h1(x))
         x = F.relu(self.h2(x))
-        x = F.relu(self.h3(x))
         action = torch.tanh(self.output(x)) * torch.FloatTensor(self.action_high)
         return action
 
 class CriticNetwork(nn.Module):
     def __init__(self, obs_dim, action_dim, goal_dim) -> None:
         super().__init__()
-        self.input = nn.Linear(obs_dim + goal_dim + action_dim, 64).to(device)
-        self.h1 = nn.Linear(64, 64).to(device)
-        self.h2 = nn.Linear(64, 64).to(device)
-        self.h3 = nn.Linear(64,64).to(device)
-        self.output = nn.Linear(64, 1).to(device)
+        self.input = nn.Linear(obs_dim + goal_dim + action_dim, 256).to(device)
+        self.h1 = nn.Linear(256, 256).to(device)
+        self.h2 = nn.Linear(256, 256).to(device)
+        self.output = nn.Linear(256, 1).to(device)
 
     def forward(self, sg, a):
         x = F.relu(self.input(torch.cat([sg, a], 1)))
         x = F.relu(self.h1(x))
         x = F.relu(self.h2(x))
-        x = F.relu(self.h3(x))
         out = self.output(x)
         return out
 
@@ -59,13 +55,14 @@ class DDPGHERAgent:
     def __init__(self, env: PickPlaceGoalPick, env_cfg: any,  obs_dim: int, action_dim: int, goal_dim: int, 
         episode_len: int=200, update_iterations: int=4, batch_size: int=256, actor_lr :float=1e-3, 
         critic_lr: float = 1e-3, input_clip_range: float=5, descr: str='', results_dir: str='./results', 
-        normalize_data: bool=True, checkpoint_dir: str=None) -> None:
+        normalize_data: bool=True, checkpoint_dir: str=None, use_demos=False) -> None:
         self.env = env
         self.env_cfg = env_cfg
         self.obs_dim = obs_dim
         self.action_dim = action_dim
         self.goal_dim = goal_dim
         self.episode_len = episode_len
+        self.use_demonstrations = use_demos
         self.lock = threading.Lock()
         self.proc_count = MPI.COMM_WORLD.Get_size()
 
@@ -143,6 +140,20 @@ class DDPGHERAgent:
             print(f"Episode {ep}: return {ep_return}")
 
     def train(self, epochs=200, iterations_per_epoch=100, episodes_per_iter=1000, exploration_eps=0.1, future_goals = 4):
+        if self.use_demonstrations:
+            if MPI.COMM_WORLD.Get_rank() == 0:
+                print(f"Loading demonstration data...")
+                self.replay_buffer.load_demonstrations(self.env, self.episode_len)
+                self.obs_normalizer.sync_stats(single_worker=True)
+                self.goal_normalizer.sync_stats(single_worker=True)
+                for _ in range(int(200 * self.update_iterations / episodes_per_iter)):
+                    self.update(single_worker=True)
+                print("Demonstrations loaded")
+            self._sync_network_parameters(self.actor)
+            self._sync_network_parameters(self.actor_target)
+            self._sync_network_parameters(self.critic)
+            self._sync_network_parameters(self.critic_target)
+
         complete_episodes = 0
         for epoch in range(epochs):
             epoch_success_count = 0
@@ -207,7 +218,7 @@ class DDPGHERAgent:
                 self.logger.print_and_log_output(f"Epoch: {epoch} Success rate (train): {epoch_success_count * 100.0 / (iterations_per_epoch * (episodes_per_iter//self.proc_count))}%"
                 f" Success rate (eval) {success_rate_eval} Duration: {end_epoch-start_epoch}s")
 
-    def update(self):
+    def update(self, single_worker = False):
         actor_losses = torch.Tensor(np.zeros(shape=(self.update_iterations)))
         critic_losses = torch.Tensor(np.zeros(shape=(self.update_iterations)))
         values = torch.Tensor(np.zeros(shape=(self.update_iterations)))
@@ -227,14 +238,18 @@ class DDPGHERAgent:
             critic_loss = nn.MSELoss()(q, target_q)
             self.critic_optimizer.zero_grad()
             critic_loss.backward()
-            self._sync_network_grads(self.critic)
+            if not single_worker:
+                self._sync_network_grads(self.critic)
             self.critic_optimizer.step()
 
             # Update actor network
-            actor_loss = -self.critic(torch.cat((state, desired_goal), 1), self.actor(torch.cat((state, desired_goal), 1))).mean()
+            action_real = self.actor(torch.cat((state, desired_goal), 1))
+            actor_loss = -self.critic(torch.cat((state, desired_goal), 1), action_real).mean()
+            actor_loss += action_real.pow(2).mean()
             self.actor_optimizer.zero_grad()
             actor_loss.backward()
-            self._sync_network_grads(self.actor)
+            if not single_worker:
+                self._sync_network_grads(self.actor)
             self.actor_optimizer.step()        
 
             # Update stats
@@ -292,10 +307,13 @@ class DDPGHERAgent:
             print(f"Loading from {path} device {device}")
             self.actor.load_state_dict(torch.load(os.path.join(path, 'actor_weights.pth'), map_location=device))
             self.critic.load_state_dict(torch.load(os.path.join(path, 'critic_weights.pth'), map_location=device))
-            with h5py.File(os.path.join(path, 'normalizer_data.h5'), 'r') as f:
-                print(f['obs_norm_mean'])
-                self.obs_normalizer.set_mean_std(f['obs_norm_mean'], f['obs_norm_std'])
-                self.goal_normalizer.set_mean_std(f['goal_norm_mean'], f['goal_norm_std'])
+            if os.path.exists(os.path.join(path, 'normalizer_data.h5')):
+                with h5py.File(os.path.join(path, 'normalizer_data.h5'), 'r') as f:
+                    print(f['obs_norm_mean'])
+                    self.obs_normalizer.set_mean_std(f['obs_norm_mean'], f['obs_norm_std'])
+                    self.goal_normalizer.set_mean_std(f['goal_norm_mean'], f['goal_norm_std'])
+            else:
+                print("Using default mean and std for normalizer")
     
     @staticmethod
     def _sync_network_parameters(net):
@@ -356,7 +374,7 @@ def main():
     env_cfg['initialization_noise'] = None
     
     if args.action == 'train':
-        env = PickPlaceGoalPick(env_config=env_cfg, p=0.5)
+        env = PickPlaceGoalPick(env_config=env_cfg, p=0.5, move_object=False)
         set_random_seeds(args.seed, env)
         agent = DDPGHERAgent(env=env, env_cfg=env_cfg, obs_dim=env.obs_dim, 
             episode_len=150,
@@ -368,6 +386,7 @@ def main():
             normalize_data=args.normalize,
             update_iterations=int(args.update_it),
             checkpoint_dir=args.checkpoint,
+            use_demos=False,
             descr='HER')
         agent.train(epochs=int(args.epochs), 
             iterations_per_epoch=int(args.it_per_epoch), 
@@ -376,7 +395,7 @@ def main():
             future_goals=int(args.k))
     elif args.action == 'rollout':
         env_cfg['has_renderer'] = True
-        env = PickPlaceGoalPick(env_config=env_cfg, p=0.5)
+        env = PickPlaceGoalPick(env_config=env_cfg, p=0)
         agent = DDPGHERAgent(env=env, env_cfg=env_cfg, obs_dim=env.obs_dim, 
             episode_len=150,
             action_dim=env.action_dim, 

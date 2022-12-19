@@ -31,19 +31,19 @@ class Normalizer:
         self.mean = mean
         self.std = std
 
-    def sync_stats(self):
+    def sync_stats(self, single_worker=False):
         with self.lock:
             loc_N = self.N_local.copy()
             loc_sum = self.sum_local.copy()
             loc_sq_sum = self.sq_sum_local.copy()
-            
             self.N_local[...] = 0
             self.sum_local[...] = 0
             self.sq_sum_local[...] = 0
-        # sync stats across workers
-        loc_N = _mpi_average(loc_N)
-        loc_sum = _mpi_average(loc_sum)
-        loc_sq_sum = _mpi_average(loc_sq_sum)
+        if not single_worker:
+            # sync stats across workers
+            loc_N = _mpi_average(loc_N)
+            loc_sum = _mpi_average(loc_sum)
+            loc_sq_sum = _mpi_average(loc_sq_sum)
         # update global data
         self.N_global += loc_N
         self.sum_global += loc_sum

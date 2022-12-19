@@ -1,6 +1,8 @@
 import numpy as np
 import threading
+import h5py
 from replay_buffer.normalizer import Normalizer
+from environment.pick_place_goal import DEMO_PATH, get_goal
 
 class HERReplayBuffer:
     def __init__(self, 
@@ -80,3 +82,36 @@ class HERReplayBuffer:
             else:
                 return self.obs[abs_indices], self.actions[abs_indices], self.next_obs[abs_indices], \
                     rewards_tmp[abs_indices], self.achieved_goals[abs_indices], self.achieved_goals[abs_fut_indices]
+
+    def load_demonstrations(self, env, episode_len):
+        with h5py.File(DEMO_PATH, "r+") as f:
+            episodes = list(f['data'].keys())
+            for i in range(len(episodes)):
+                ep = episodes[i]
+                acts_data = f["data/{}/actions".format(ep)][()]
+                acts = np.zeros(shape=(episode_len, acts_data.shape[1])) 
+
+                ep_obs_data = f["data/{}/obs_flat".format(ep)][()]
+                ep_obs = np.zeros(shape=(episode_len, ep_obs_data.shape[1]))
+
+                ep_next_obs_data = f["data/{}/next_obs_flat".format(ep)][()]
+                ep_next_obs = np.zeros(shape=(episode_len, ep_obs_data.shape[1]))
+
+                current_episode_len = np.min([episode_len, ep_obs_data.shape[0]])
+                acts[:current_episode_len, :] = acts_data[:current_episode_len, :]
+                ep_obs[:current_episode_len, :] = ep_obs_data[:current_episode_len, :]
+                ep_next_obs[:current_episode_len, :] = ep_next_obs_data[:current_episode_len, :]
+
+                goal, goal_t = get_goal(env, ep_obs_data)
+                if goal is None:
+                    continue
+                acts[goal_t:,:] = 0
+                ep_obs[goal_t:, :] = ep_obs_data[goal_t-1]
+                ep_next_obs[goal_t:, :] = ep_next_obs_data[goal_t-1]
+                ag = ep_next_obs[:, :3] # TODO replace this with the original function
+                dg = np.full_like(ag, fill_value=goal)
+                rewards = np.full(shape=(ag.shape[0], 1), fill_value=-1)
+                for t in range(episode_len):
+                    rewards[t] = env.calc_reward_pick(ag[t], dg[t])
+                self.add_episode(ep_obs[:episode_len], acts[:episode_len], ep_next_obs[:episode_len], 
+                    rewards[:episode_len], ag[:episode_len], dg[:episode_len])

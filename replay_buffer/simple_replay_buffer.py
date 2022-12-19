@@ -29,7 +29,7 @@ def collect_observations():
             sum_steps += states.shape[0]
             t = 0
             done = False
-            while t < acts.shape[0] and not done:
+            while t < acts.shape[0]:
                 action = acts[t]
                 obss[t] = obs
                 obs, reward, done, _ = env.step(action)
@@ -38,8 +38,10 @@ def collect_observations():
                 t = t + 1
             del f["data/{}/reward_pick_only".format(ep)]
             f.create_dataset("data/{}/reward_pick_only".format(ep), data=rs)
-            # f.create_dataset("data/{}/obs_flat".format(ep), data=obss)
-            # f.create_dataset("data/{}/next_obs_flat".format(ep), data=obss)
+            del f["data/{}/obs_flat".format(ep)]
+            f.create_dataset("data/{}/obs_flat".format(ep), data=obss)
+            del f["data/{}/next_obs_flat".format(ep)]
+            f.create_dataset("data/{}/next_obs_flat".format(ep), data=obss)
         print(f"Mean steps per episode {sum_steps / len(demos)}")
 
 class SimpleReplayBuffer:
