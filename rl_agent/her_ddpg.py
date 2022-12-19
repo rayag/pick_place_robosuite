@@ -126,8 +126,10 @@ class DDPGHERAgent:
             done = False
             ep_return = 0
             while not done and t < steps:
-                obs_goal_torch = torch.FloatTensor(np.concatenate((obs, goal))).to(device)
-                action = self.actor(obs_goal_torch)
+                obs_norm = np.squeeze(self.obs_normalizer.normalize(obs))
+                goal_norm = np.squeeze(self.goal_normalizer.normalize(goal))
+                obs_goal_norm_torch = torch.FloatTensor(np.concatenate((obs_norm, goal_norm))).to(device)
+                action = self.actor(obs_goal_norm_torch)
                 action_dateched = action.cpu().detach().numpy()\
                     .clip(env.action_space.low, env.action_space.high)
                 next_obs, achieved_goal = env.step(action_dateched)
@@ -276,8 +278,10 @@ class DDPGHERAgent:
                 t = 0
                 done = False
                 while not done and t < episodes:
-                    obs_goal_torch = torch.FloatTensor(np.concatenate((obs, goal))).to(device)
-                    action = self.actor(obs_goal_torch)
+                    obs_norm = np.squeeze(self.obs_normalizer.normalize(obs))
+                    goal_norm = np.squeeze(self.goal_normalizer.normalize(goal))
+                    obs_goal_norm_torch = torch.FloatTensor(np.concatenate((obs_norm, goal_norm))).to(device)
+                    action = self.actor_target(obs_goal_norm_torch)
                     action_dateched = action.cpu().detach().numpy()\
                         .clip(self.env.action_space.low, self.env.action_space.high)
                     next_obs, achieved_goal = env.step(action_dateched)
@@ -312,8 +316,8 @@ class DDPGHERAgent:
             if os.path.exists(os.path.join(path, 'normalizer_data.h5')):
                 with h5py.File(os.path.join(path, 'normalizer_data.h5'), 'r') as f:
                     print(f['obs_norm_mean'])
-                    self.obs_normalizer.set_mean_std(f['obs_norm_mean'], f['obs_norm_std'])
-                    self.goal_normalizer.set_mean_std(f['goal_norm_mean'], f['goal_norm_std'])
+                    self.obs_normalizer.set_mean_std(f['obs_norm_mean'][()], f['obs_norm_std'][()])
+                    self.goal_normalizer.set_mean_std(f['goal_norm_mean'][()], f['goal_norm_std'][()])
             else:
                 print("Using default mean and std for normalizer")
     
@@ -362,13 +366,14 @@ def main():
     parser.add_argument('--it_per_epoch', default=50, type=int)
     parser.add_argument('--ep_per_it', default=16)
     parser.add_argument('--exp_eps', default=0, type=float)
-    parser.add_argument('--normalize', action='store_true', default=True)
+    parser.add_argument('--normalize', action='store_true', default=False)
     parser.add_argument('--update_it', default=40)
     parser.add_argument('--k', default=4)
     parser.add_argument('--seed', default=59, help="Random seed")
-    parser.add_argument('-a', '--action', choices=['train', 'rollout'], default='train')
+    parser.add_argument('--move_object', default=False, action='store_true')
+    parser.add_argument('-a', '--action', choices=['train', 'rollout'], default='rollout')
     args = parser.parse_args()
-    print(f"Actor alpha {args.actor_lr}, Critic alpha {args.critic_lr} Normalize {args.normalize}")
+    print(f"Actor alpha {args.actor_lr}, Critic alpha {args.critic_lr} Normalize {args.normalize} Move object {args.move_object}")
 
     env_cfg = PICK_PLACE_DEFAULT_ENV_CFG
     env_cfg['pick_only'] = True
@@ -376,7 +381,7 @@ def main():
     env_cfg['initialization_noise'] = None
     
     if args.action == 'train':
-        env = PickPlaceGoalPick(env_config=env_cfg, p=0.5, move_object=False)
+        env = PickPlaceGoalPick(env_config=env_cfg, p=0.5, move_object=args.move_object)
         set_random_seeds(args.seed, env)
         agent = DDPGHERAgent(env=env, env_cfg=env_cfg, obs_dim=env.obs_dim, 
             episode_len=150,
