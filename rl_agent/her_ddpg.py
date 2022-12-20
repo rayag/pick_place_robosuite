@@ -27,12 +27,14 @@ class ActorNetwork(nn.Module):
         self.input = nn.Linear(obs_dim, 256).to(device) #TODO: allow custom layer sizes
         self.h1 = nn.Linear(256, 256).to(device)
         self.h2 = nn.Linear(256, 256).to(device)
+        self.h3 = nn.Linear(256, 256).to(device)
         self.output = nn.Linear(256, action_dim).to(device)
 
     def forward(self, obs):
         x = F.relu(self.input(obs))
         x = F.relu(self.h1(x))
         x = F.relu(self.h2(x))
+        x = F.relu(self.h3(x))
         action = torch.tanh(self.output(x)) * torch.FloatTensor(self.action_high)
         return action
 
@@ -42,12 +44,14 @@ class CriticNetwork(nn.Module):
         self.input = nn.Linear(obs_dim + goal_dim + action_dim, 256).to(device)
         self.h1 = nn.Linear(256, 256).to(device)
         self.h2 = nn.Linear(256, 256).to(device)
+        self.h3 = nn.Linear(256, 256).to(device)
         self.output = nn.Linear(256, 1).to(device)
 
     def forward(self, sg, a):
         x = F.relu(self.input(torch.cat([sg, a], 1)))
         x = F.relu(self.h1(x))
         x = F.relu(self.h2(x))
+        x = F.relu(self.h3(x))
         out = self.output(x)
         return out
 
@@ -66,6 +70,7 @@ class DDPGHERAgent:
         self.lock = threading.Lock()
         self.proc_count = MPI.COMM_WORLD.Get_size()
 
+        self.normalize_data = normalize_data
         self.obs_normalizer = Normalizer(self.obs_dim, clip_range=input_clip_range)
         self.goal_normalizer = Normalizer(self.goal_dim, clip_range=input_clip_range)
 
@@ -210,15 +215,16 @@ class DDPGHERAgent:
 
                     self.replay_buffer.add_episode(ep_obs, ep_actions, ep_next_obs, ep_rewards, ep_achieved_goals, ep_desired_goals)
                 if started_episodes > 0: # if the goal is satisfied at the beginning, we do not start the episode
-                    self.obs_normalizer.sync_stats()
-                    self.goal_normalizer.sync_stats()
+                    if self.normalize_data:
+                        self.obs_normalizer.sync_stats()
+                        self.goal_normalizer.sync_stats()
                     actor_loss, critic_loss, value = self.update()
                     self.logger.add(reward, actor_loss, critic_loss, complete_episodes, value)
-                    self._save(epoch * iterations_per_epoch + it)
                     self.logger.print_and_log_output(f"Epoch {epoch} It {it} Success rate: {iteration_success_count * 100.0 / (episodes_per_iter//self.proc_count)}%")
             end_epoch = time.time()
             if MPI.COMM_WORLD.Get_rank() == 0:
                 success_rate_eval = self._evaluate()
+                self._save(epoch)
                 self.logger.print_and_log_output(f"Epoch: {epoch} Success rate (train): {epoch_success_count * 100.0 / (iterations_per_epoch * (episodes_per_iter//self.proc_count))}%"
                 f" Success rate (eval) {success_rate_eval} Duration: {end_epoch-start_epoch}s")
 
@@ -302,6 +308,8 @@ class DDPGHERAgent:
                 os.makedirs(checkpoint_path)
             torch.save(self.actor.state_dict(), os.path.join(checkpoint_path, 'actor_weights.pth'))
             torch.save(self.critic.state_dict(), os.path.join(checkpoint_path, 'critic_weights.pth'))
+            torch.save(self.actor_target.state_dict(), os.path.join(checkpoint_path, 'actor_target_weights.pth'))
+            torch.save(self.critic_target.state_dict(), os.path.join(checkpoint_path, 'critic_target_weights.pth'))
             with h5py.File(os.path.join(checkpoint_path, 'normalizer_data.h5'), 'w') as f:
                 f.create_dataset('obs_norm_mean', data=self.obs_normalizer.mean)
                 f.create_dataset('obs_norm_std', data=self.obs_normalizer.std)
@@ -313,6 +321,8 @@ class DDPGHERAgent:
             print(f"Loading from {path} device {device}")
             self.actor.load_state_dict(torch.load(os.path.join(path, 'actor_weights.pth'), map_location=device))
             self.critic.load_state_dict(torch.load(os.path.join(path, 'critic_weights.pth'), map_location=device))
+            self.actor.load_state_dict(torch.load(os.path.join(path, 'actor_target_weights.pth'), map_location=device))
+            self.critic.load_state_dict(torch.load(os.path.join(path, 'critic_target_weights.pth'), map_location=device))
             if os.path.exists(os.path.join(path, 'normalizer_data.h5')):
                 with h5py.File(os.path.join(path, 'normalizer_data.h5'), 'r') as f:
                     print(f['obs_norm_mean'])
@@ -363,15 +373,15 @@ def main():
     parser.add_argument('-alr', '--actor-lr', default=1e-3)
     parser.add_argument('-clr', '--critic-lr', default=1e-3)
     parser.add_argument('--epochs', default=1000, type=int)
-    parser.add_argument('--it_per_epoch', default=50, type=int)
-    parser.add_argument('--ep_per_it', default=16)
+    parser.add_argument('--it_per_epoch', default=1, type=int)
+    parser.add_argument('--ep_per_it', default=2)
     parser.add_argument('--exp_eps', default=0, type=float)
     parser.add_argument('--normalize', action='store_true', default=False)
     parser.add_argument('--update_it', default=40)
     parser.add_argument('--k', default=4)
     parser.add_argument('--seed', default=59, help="Random seed")
     parser.add_argument('--move_object', default=False, action='store_true')
-    parser.add_argument('-a', '--action', choices=['train', 'rollout'], default='rollout')
+    parser.add_argument('-a', '--action', choices=['train', 'rollout'], default='train')
     args = parser.parse_args()
     print(f"Actor alpha {args.actor_lr}, Critic alpha {args.critic_lr} Normalize {args.normalize} Move object {args.move_object}")
 
