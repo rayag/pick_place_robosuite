@@ -79,20 +79,23 @@ class DDPGHERAgent:
 
         self.actor = ActorNetwork(obs_dim=self.obs_dim + self.goal_dim, action_dim=self.action_dim, 
             action_low=self.env.action_space.low, action_high=self.env.action_space.high)
-        self._sync_network_parameters(self.actor)
         self.actor_target = ActorNetwork(obs_dim=self.obs_dim + self.goal_dim, action_dim=self.action_dim,
             action_low=self.env.action_space.low, action_high=self.env.action_space.high)
         self.actor_target.load_state_dict(self.actor.state_dict())
         self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=actor_lr)
 
         self.critic = CriticNetwork(self.obs_dim, self.action_dim, self.goal_dim)
-        self._sync_network_parameters(self.critic)
         self.critic_target = CriticNetwork(self.obs_dim, self.action_dim, self.goal_dim)
         self.critic_target.load_state_dict(self.critic.state_dict())
         self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=critic_lr)
 
-        if checkpoint_dir is not None:
+        if checkpoint_dir is not None and MPI.COMM_WORLD.Get_rank() == 0:
             self._load_from(checkpoint_dir)
+        
+        self._sync_network_parameters(self.actor)
+        self._sync_network_parameters(self.actor_target)
+        self._sync_network_parameters(self.critic)
+        self._sync_network_parameters(self.critic_target)
 
         self.update_iterations = update_iterations
         self.batch_size = batch_size
@@ -321,8 +324,8 @@ class DDPGHERAgent:
             print(f"Loading from {path} device {device}")
             self.actor.load_state_dict(torch.load(os.path.join(path, 'actor_weights.pth'), map_location=device))
             self.critic.load_state_dict(torch.load(os.path.join(path, 'critic_weights.pth'), map_location=device))
-            self.actor.load_state_dict(torch.load(os.path.join(path, 'actor_target_weights.pth'), map_location=device))
-            self.critic.load_state_dict(torch.load(os.path.join(path, 'critic_target_weights.pth'), map_location=device))
+            self.actor_target.load_state_dict(torch.load(os.path.join(path, 'actor_target_weights.pth'), map_location=device))
+            self.critic_target.load_state_dict(torch.load(os.path.join(path, 'critic_target_weights.pth'), map_location=device))
             if os.path.exists(os.path.join(path, 'normalizer_data.h5')):
                 with h5py.File(os.path.join(path, 'normalizer_data.h5'), 'r') as f:
                     print(f['obs_norm_mean'])
