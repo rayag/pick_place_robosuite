@@ -48,9 +48,13 @@ class Normalizer:
         self.N_global += loc_N
         self.sum_global += loc_sum
         self.sq_sum_global += loc_sq_sum
-        x = (self.sq_sum_global / self.N_global[0]) - np.square(self.sum_global / self.N_global[0])
-        self.mean = self.sum_global / self.N_global
-        self.std = np.sqrt(np.max([np.square(self.eps), (self.sq_sum_global / self.N_global[0]) - np.square(self.sum_global / self.N_global[0])], axis=0))
+        if np.all(self.N_global) > 0:
+            self.mean = self.sum_global / self.N_global
+            self.std = np.sqrt(np.max([np.square(self.eps), 
+                (self.sq_sum_global / self.N_global[0]) - np.square(self.sum_global / self.N_global[0])], axis=0))
+        else:
+            self.mean = 0
+            self.std = 1
 
  
     def normalize(self, data):

@@ -5,16 +5,20 @@ class ProgressLogger:
     def __init__(self, path) -> None:
         self.progress_file_path = os.path.join(path, "progress.csv")
         self.output_file_path = os.path.join(path, 'output.txt')
-        self.capacity = 100
+        self.epoch_file_path = os.path.join(path, 'epoch.csv')
+        self.capacity = 50
         self.returns = np.zeros(shape=(self.capacity,), dtype=np.float32)
         self.actor_loss = np.zeros(shape=(self.capacity,), dtype=np.float32)
         self.critic_loss = np.zeros(shape=(self.capacity,), dtype=np.float32)
         self.values = np.zeros(shape=(self.capacity,), dtype=np.float32)
         self.complete_episodes = np.zeros(shape=(self.capacity,), dtype=np.float32)
+        self.epoch_data = np.zeros(shape=(self.capacity, 2))
         self.it = 0
         if MPI.COMM_WORLD.Get_rank() == 0:
             with open(self.progress_file_path, 'w+') as f:
                 f.write("returns,actor_loss,critic_loss,complete_episodes,values\n")
+            with open(self.epoch_file_path, 'w+') as f:
+                f.write("success_rate,misc\n")
     
     def add(self, ep_return, actor_loss, critic_loss, complete_episodes, value):
         if MPI.COMM_WORLD.Get_rank() == 0:
@@ -28,6 +32,17 @@ class ProgressLogger:
                 with open(self.progress_file_path, "a") as f:
                     for i in range(self.it):
                         f.write(f"{self.returns[i]},{self.actor_loss[i]},{self.critic_loss[i]},{self.complete_episodes[i]},{self.values[i]}\n")
+                self.it = 0
+
+    def add_epoch_data(self, success_rate, misc=None):
+        if MPI.COMM_WORLD.Get_rank() == 0:
+            self.epoch_data[self.it][0] = success_rate
+            self.epoch_data[self.it][1] = 0 if misc is None else misc
+            self.it += 1
+            if self.it == self.capacity:
+                with open(self.epoch_file_path, "a") as f:
+                    for i in range(self.it):
+                        f.write(f"{self.epoch_data[i][0],self.epoch_data[i][1]}\n")
                 self.it = 0
 
     def print_and_log_output(self, output):

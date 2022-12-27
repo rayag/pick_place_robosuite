@@ -20,7 +20,7 @@ def get_states_grabbed_can():
             states_np[i] = state
         return states_np
 
-class PickPlaceGoalPick(gym.Env):
+class PickPlaceGoalPickLowDim(gym.Env):
     def __init__(self, env_config=PICK_PLACE_DEFAULT_ENV_CFG, seed=None, p=1, move_object=True) -> None:
         super().__init__()
         self.env_wrapper = PickPlaceWrapper(env_config=env_config)
@@ -32,10 +32,13 @@ class PickPlaceGoalPick(gym.Env):
         self.move_object = move_object
         self.p = p
 
-    def step(self, action):
+    def step(self, action_low_dim):
         '''
         returns next observation, achieved_goal
         '''
+        action = np.zeros(shape=(self.env_wrapper.gym_env.env.action_dim))
+        action[:3] = action_low_dim[:-1]
+        action[-1] = action_low_dim[-1] 
         obs, _, done, info = self.env_wrapper.step(action)
         if self.move_object:
             return obs, self.extract_can_pos_from_obs(obs)
@@ -57,6 +60,9 @@ class PickPlaceGoalPick(gym.Env):
         obs = self.env_wrapper.reset_to(state)
         self.goal = self.generate_goal_pick()
         return obs, self.goal
+
+    def set_p(self, p):
+        self.p = p
     
     def generate_goal_can(self):
         CAN_IDX = 3 # TODO: make this work for all objects
@@ -81,15 +87,21 @@ class PickPlaceGoalPick(gym.Env):
     def generate_goal_pick(self):
         rs_env = self.env_wrapper.gym_env.env
         obj_pos = rs_env.sim.data.body_xpos[rs_env.obj_body_id['Can']]
-        x = obj_pos[0] + np.random.uniform(low=0.02, high=0.2)
-        y = obj_pos[1] + np.random.uniform(low=0.02, high=0.2)
-        # sometimes the goal should be on the table
-        prob = np.random.rand()
-        if (prob < self.p or not self.move_object):
-            z = obj_pos[2]
+        if self.move_object:
+            x = obj_pos[0] + np.random.uniform(low=0.02, high=0.2)
+            y = obj_pos[1] + np.random.uniform(low=0.02, high=0.2)
+            # sometimes the goal should be on the table
+            prob = np.random.rand()
+            if (prob < self.p or not self.move_object):
+                z = obj_pos[2]
+            else:
+                z = obj_pos[2] + np.random.uniform(low=0.1, high=0.2)
+            return np.array([x,y,z])
         else:
-            z = obj_pos[2] + np.random.uniform(low=0.1, high=0.2)
-        return np.array([x,y,z])
+            x = obj_pos[0]
+            y = obj_pos[0]
+            z = np.random.uniform(low=obj_pos[2], high=obj_pos[2] + 0.002)
+            return np.array([x,y,z])
 
     def calc_reward_can(self, state_goal):
         goal = state_goal[:self.goal_dim]
@@ -128,7 +140,7 @@ class PickPlaceGoalPick(gym.Env):
 
     @property
     def action_dim(self):
-        return self.env_wrapper.gym_env.env.action_dim
+        return 4
 
     @property
     def obs_dim(self): 
@@ -136,16 +148,16 @@ class PickPlaceGoalPick(gym.Env):
 
     @property
     def actions_high(self):
-        return self.action_space.high
+        return np.array([1,1,1,1])
     
     @property
     def actions_low(self):
-        return self.action_space.low
+        return np.array([-1,-1,-1,-1])
 
         
 DEMO_PATH = "/home/rayageorgieva/uni/masters/pick_place_robosuite/demo/low_dim.hdf5"
 
-def get_goal(env: PickPlaceGoalPick, ep_obs):
+def get_goal(env: PickPlaceGoalPickLowDim, ep_obs):
     ag = env.extract_can_pos_from_obs(ep_obs[0])
     i = 1
     while i < ep_obs.shape[0]:
@@ -160,7 +172,7 @@ def inspect_observations(visualize = False):
     env_cfg['pick_only'] = True
     if visualize:
         env_cfg['has_renderer'] = visualize
-    env = PickPlaceGoalPick(p=0, move_object=False)
+    env = PickPlaceGoalPickLowDim(p=0, move_object=False)
     with h5py.File(DEMO_PATH, "r+") as f:
         demos = list(f['data'].keys())
         print(f"Total episodes {len(demos)}")
@@ -184,10 +196,11 @@ def inspect_observations(visualize = False):
             done = False
             while t < acts.shape[0]:
                 if done:
-                    action = np.zeros(shape=(acts.shape[1]))
+                    action = np.zeros(shape=(env.action_dim))
                 else:
-                    action = acts[t]
-                    action[4:6] = 0
+                    action = np.zeros(shape=(env.action_dim))
+                    action[:3] = acts[t][:3]
+                    action[3] = acts[t][-1]
                 obs, achieved_goal = env.step(action)
                 reward = env.calc_reward_pick(achieved_goal, goal)
                 done = reward == 0.0

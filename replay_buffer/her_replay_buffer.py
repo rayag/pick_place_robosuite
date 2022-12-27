@@ -16,13 +16,12 @@ class HERReplayBuffer:
         sample_strategy: None, 
         obs_normalizer: Normalizer,
         goal_normalizar: Normalizer,
-        reward_fn: any, normalize_data: bool = False) -> None:
+        normalize_data: bool = False) -> None:
         self.max_episodes = capacity // episode_len
         self.episode_len = episode_len
         self.capacity = self.max_episodes * episode_len
         self.size = 0   # number of entries
         self.it = 0     # position to add next batch
-        self.reward_fn = reward_fn
         self.lock = threading.Lock()
 
         self.future_p = 1 - (1.0 / (1 + k))
@@ -55,7 +54,7 @@ class HERReplayBuffer:
             self.it = (self.it + self.episode_len) % self.capacity
             self.size = min(self.size + self.episode_len, self.capacity)        
     
-    def sample(self, batch_size):
+    def sample(self, batch_size, reward_fn):
         with self.lock:
             batch_size = min(self.size, batch_size)
             episodes_count = self.size // self.episode_len
@@ -70,7 +69,7 @@ class HERReplayBuffer:
                 for i in her_indices[0]:
                     abs_i = abs_indices[i]
                     abs_fut_i = abs_fut_indices[i]
-                    rewards_tmp[abs_i] = self.reward_fn(self.achieved_goals[abs_i], self.achieved_goals[abs_fut_i])
+                    rewards_tmp[abs_i] = reward_fn(self.achieved_goals[abs_i], self.achieved_goals[abs_fut_i])
 
             if self.normalize_data:
                 return self.obs_normalizer.normalize(np.clip(self.obs[abs_indices], a_min=-self.input_clip_range, a_max=self.input_clip_range)),   \
@@ -89,7 +88,7 @@ class HERReplayBuffer:
             for i in range(len(episodes)):
                 ep = episodes[i]
                 acts_data = f["data/{}/actions".format(ep)][()]
-                acts = np.zeros(shape=(episode_len, acts_data.shape[1])) 
+                acts = np.zeros(shape=(episode_len, env.action_dim)) 
 
                 ep_obs_data = f["data/{}/obs_flat".format(ep)][()]
                 ep_obs = np.zeros(shape=(episode_len, ep_obs_data.shape[1]))
@@ -98,7 +97,11 @@ class HERReplayBuffer:
                 ep_next_obs = np.zeros(shape=(episode_len, ep_obs_data.shape[1]))
 
                 current_episode_len = np.min([episode_len, ep_obs_data.shape[0]])
-                acts[:current_episode_len, :] = acts_data[:current_episode_len, :]
+                if env.action_dim == 4:
+                    acts[:current_episode_len, :] = acts_data[:current_episode_len, :4]
+                    acts[:current_episode_len, -1] = acts_data[:current_episode_len, -1]
+                else:
+                    acts[:current_episode_len, :] = acts_data[:current_episode_len, :]
                 ep_obs[:current_episode_len, :] = ep_obs_data[:current_episode_len, :]
                 ep_next_obs[:current_episode_len, :] = ep_next_obs_data[:current_episode_len, :]
 
