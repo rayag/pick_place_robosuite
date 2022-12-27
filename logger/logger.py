@@ -12,7 +12,6 @@ class ProgressLogger:
         self.critic_loss = np.zeros(shape=(self.capacity,), dtype=np.float32)
         self.values = np.zeros(shape=(self.capacity,), dtype=np.float32)
         self.complete_episodes = np.zeros(shape=(self.capacity,), dtype=np.float32)
-        self.epoch_data = np.zeros(shape=(self.capacity, 2))
         self.it = 0
         if MPI.COMM_WORLD.Get_rank() == 0:
             with open(self.progress_file_path, 'w+') as f:
@@ -36,14 +35,8 @@ class ProgressLogger:
 
     def add_epoch_data(self, success_rate, misc=None):
         if MPI.COMM_WORLD.Get_rank() == 0:
-            self.epoch_data[self.it][0] = success_rate
-            self.epoch_data[self.it][1] = 0 if misc is None else misc
-            self.it += 1
-            if self.it == self.capacity:
-                with open(self.epoch_file_path, "a") as f:
-                    for i in range(self.it):
-                        f.write(f"{self.epoch_data[i][0],self.epoch_data[i][1]}\n")
-                self.it = 0
+            with open(self.epoch_file_path, "a") as f:
+                f.write(f"{success_rate},{0 if misc is None else misc}\n")
 
     def print_and_log_output(self, output):
         print(output)

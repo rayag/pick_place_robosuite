@@ -23,18 +23,20 @@ device = 'cpu'#torch.device("cuda" if torch.cuda.is_available() else "cpu")
 class ActorNetwork(nn.Module): 
     def __init__(self, obs_dim, action_dim, action_high = 1.0, action_low = 0.0) -> None:
         super(ActorNetwork, self).__init__()
-        self.action_high = action_high
-        self.action_low = action_low
+        self.action_high = torch.FloatTensor(action_high).to(device)
+        self.action_low = torch.FloatTensor(action_low).to(device)
         self.input = nn.Linear(obs_dim, 256).to(device) #TODO: allow custom layer sizes
         self.h1 = nn.Linear(256, 256).to(device)
         self.h2 = nn.Linear(256, 256).to(device)
+        self.h3 = nn.Linear(256, 256).to(device)
         self.output = nn.Linear(256, action_dim).to(device)
 
     def forward(self, obs):
         x = F.relu(self.input(obs))
         x = F.relu(self.h1(x))
         x = F.relu(self.h2(x))
-        action = torch.tanh(self.output(x)) * torch.FloatTensor(self.action_high)
+        x = F.relu(self.h3(x))
+        action = torch.tanh(self.output(x)) * self.action_high
         return action
 
 class CriticNetwork(nn.Module):
@@ -43,12 +45,14 @@ class CriticNetwork(nn.Module):
         self.input = nn.Linear(obs_dim + goal_dim + action_dim, 256).to(device)
         self.h1 = nn.Linear(256, 256).to(device)
         self.h2 = nn.Linear(256, 256).to(device)
+        self.h3 = nn.Linear(256, 256).to(device)
         self.output = nn.Linear(256, 1).to(device)
 
     def forward(self, sg, a):
         x = F.relu(self.input(torch.cat([sg, a], 1)))
         x = F.relu(self.h1(x))
         x = F.relu(self.h2(x))
+        x = F.relu(self.h3(x))
         out = self.output(x)
         return out
 
@@ -131,7 +135,7 @@ class DDPGHERAgent:
             normalize_data=normalize_data)
 
     def rollout(self, episodes = 10, steps = 250):
-        env = PickPlaceGoalPickLowDim(env_config=self.env_cfg, p=0)
+        env = PickPlaceGoalPick(env_config=self.env_cfg, p=0)
         for ep in range(episodes):
             obs, goal = env.reset()
             t = 0
@@ -141,10 +145,9 @@ class DDPGHERAgent:
                 obs_norm = np.squeeze(self.obs_normalizer.normalize(obs))
                 goal_norm = np.squeeze(self.goal_normalizer.normalize(goal))
                 obs_goal_norm_torch = torch.FloatTensor(np.concatenate((obs_norm, goal_norm))).to(device)
-                action = self.actor_target(obs_goal_norm_torch)
+                action = self.actor(obs_goal_norm_torch)
                 action_dateched = action.cpu().detach().numpy()\
                     .clip(env.actions_low, env.actions_high)
-                print(action, action_dateched)
                 next_obs, achieved_goal = env.step(action_dateched)
                 reward = self.reward_fn(achieved_goal, goal)
                 done = (reward == 0)
@@ -169,14 +172,14 @@ class DDPGHERAgent:
             self._sync_network_parameters(self.critic)
             self._sync_network_parameters(self.critic_target)
 
-        complete_episodes = 0
-        has_behavioral_policy = self.behavioral_policy is not None
-        behavioral_policy_prob = 0.9 # probability of using the behavioral policy instead of the learned policy
-        behavioral_policy_prob_decay = 0.95
+        beh_policy_prob = 0.8
         for epoch in range(epochs):
+            if MPI.COMM_WORLD.Get_rank() == 0:
+                self.logger.print_and_log_output(f"Starting epoch {epoch}, behavioral policy probability: {beh_policy_prob}")
             epoch_success_count = 0
             start_epoch = time.time()
             for it in range(iterations_per_epoch):
+                it_start = time.time()
                 iteration_success_count = 0
                 started_episodes = 0
                 for ep in range(episodes_per_iter//self.proc_count):
@@ -201,11 +204,16 @@ class DDPGHERAgent:
                         if p < exploration_eps:
                             action_detached = np.random.uniform(size=self.action_dim, low=self.env.actions_low, high=self.env.actions_high)
                         else:
-                            action = self.actor(obs_goal_norm_torch)
+                            if self.behavioral_policy is not None and np.random.rand() < beh_policy_prob:
+                                action = self.behavioral_policy(obs_goal_norm_torch)
+                            else:
+                                action = self.actor(obs_goal_norm_torch)
                             action_detached = (action.cpu().detach().numpy()+np.random.normal(scale=0.1, size=self.action_dim))\
                                 .clip(self.env.actions_low, self.env.actions_high)
                         next_obs, achieved_goal = self.env.step(action_detached)
                         reward = self.reward_fn(achieved_goal, goal)
+                        if reward == 0.0:
+                            iteration_success_count += 1
 
                         ep_obs[t] = obs
                         ep_actions[t] = action_detached.copy()
@@ -215,14 +223,19 @@ class DDPGHERAgent:
                         ep_desired_goals[t] = goal
                         obs = next_obs
                     self.replay_buffer.add_episode(ep_obs, ep_actions, ep_next_obs, ep_rewards, ep_achieved_goals, ep_desired_goals)
+                exp_gather_end = time.time()
+                print(f"Experience gathering took {exp_gather_end - it_start}")
                 if started_episodes > 0: # if the goal is satisfied at the beginning, we do not start the episode
                     if self.normalize_data:
                         self.obs_normalizer.sync_stats()
                         self.goal_normalizer.sync_stats()
-                    actor_loss, critic_loss, value = self.update()
-                    self.logger.add(reward, actor_loss, critic_loss, 0, value)
+                actor_loss, critic_loss, value = self.update()
+                print(f"Update took: {time.time() - exp_gather_end}")
+                self.logger.add(reward, actor_loss, critic_loss, iteration_success_count, value)
+            beh_policy_prob = np.max([0.1, 0.95*beh_policy_prob])
             end_epoch = time.time()
             success_rate_eval = self._evaluate()
+            print(f"Evaluation took {time.time() - end_epoch}")
             if MPI.COMM_WORLD.Get_rank() == 0:
                 self._save(epoch)
                 self.logger.print_and_log_output(f"Epoch: {epoch} Success rate (eval) {success_rate_eval} Duration: {end_epoch-start_epoch}s")
@@ -232,54 +245,57 @@ class DDPGHERAgent:
         actor_losses = torch.Tensor(np.zeros(shape=(self.update_iterations)))
         critic_losses = torch.Tensor(np.zeros(shape=(self.update_iterations)))
         values = torch.Tensor(np.zeros(shape=(self.update_iterations)))
-        for it in range(self.update_iterations):
-            state, action, next_state, reward, achieved_goal, desired_goal = self.replay_buffer.sample(self.batch_size, self.reward_fn)
-            state = torch.FloatTensor(state).to(device)
-            action = torch.FloatTensor(action).to(device)
-            next_state = torch.FloatTensor(next_state).to(device)
-            reward = torch.FloatTensor(reward).to(device)
-            achieved_goal = torch.FloatTensor(achieved_goal).to(device)
-            desired_goal = torch.FloatTensor(desired_goal).to(device)
+        if self.replay_buffer.size > 0:
+            for it in range(self.update_iterations):
+                state, action, next_state, reward, achieved_goal, desired_goal = self.replay_buffer.sample(self.batch_size, self.reward_fn)
+                state = torch.FloatTensor(state).to(device)
+                action = torch.FloatTensor(action).to(device)
+                next_state = torch.FloatTensor(next_state).to(device)
+                reward = torch.FloatTensor(reward).to(device)
+                achieved_goal = torch.FloatTensor(achieved_goal).to(device)
+                desired_goal = torch.FloatTensor(desired_goal).to(device)
 
-            # Update critic network
-            q_next_state = self.critic_target(torch.cat((next_state, desired_goal), 1), self.actor_target(torch.cat((next_state, desired_goal),1)))
-            target_q = torch.clip((reward + self.gamma * q_next_state.detach()), min=-self.clip_return, max=0)
-            q = self.critic(torch.cat((state, desired_goal), 1), action)
-            critic_loss = nn.MSELoss()(q, target_q)
-            self.critic_optimizer.zero_grad()
-            critic_loss.backward()
-            if not single_worker:
-                self._sync_network_grads(self.critic)
-            self.critic_optimizer.step()
+                # Update critic network
+                q_next_state = self.critic_target(torch.cat((next_state, desired_goal), 1), self.actor_target(torch.cat((next_state, desired_goal),1)))
+                target_q = torch.clip((reward + self.gamma * q_next_state.detach()), min=-self.clip_return, max=0)
+                q = self.critic(torch.cat((state, desired_goal), 1), action)
+                critic_loss = nn.MSELoss()(q, target_q)
+                self.critic_optimizer.zero_grad()
+                critic_loss.backward()
+                if not single_worker:
+                    self._sync_network_grads(self.critic)
+                self.critic_optimizer.step()
 
-            # Update actor network
-            action_real = self.actor(torch.cat((state, desired_goal), 1))
-            actor_loss = -self.critic(torch.cat((state, desired_goal), 1), action_real).mean()
-            actor_loss += 0.5 * action_real.pow(2).mean() # l2 regularization
-            self.actor_optimizer.zero_grad()
-            actor_loss.backward()
-            if not single_worker:
-                self._sync_network_grads(self.actor)
-            self.actor_optimizer.step()        
+                # Update actor network
+                action_real = self.actor(torch.cat((state, desired_goal), 1))
+                actor_loss = -self.critic(torch.cat((state, desired_goal), 1), action_real).mean()
+                actor_loss += 0.5 * action_real.pow(2).mean() # l2 regularization
+                self.actor_optimizer.zero_grad()
+                actor_loss.backward()
+                if not single_worker:
+                    self._sync_network_grads(self.actor)
+                self.actor_optimizer.step()        
 
-            # Update stats
-            critic_losses[it] = critic_loss.detach()
-            actor_losses[it] = actor_loss.detach()
-            values[it] = q.mean().detach()
+                # Update stats
+                critic_losses[it] = critic_loss.detach()
+                actor_losses[it] = actor_loss.detach()
+                values[it] = q.mean().detach()
 
-        # Soft update target networks
-        for target_critic_params, critic_params in zip(self.critic_target.parameters(), self.critic.parameters()):
-            target_critic_params.data.copy_(self.polyak * target_critic_params.data + (1.0 - self.polyak) * critic_params.data)
+            # Soft update target networks
+            for target_critic_params, critic_params in zip(self.critic_target.parameters(), self.critic.parameters()):
+                target_critic_params.data.copy_(self.polyak * target_critic_params.data + (1.0 - self.polyak) * critic_params.data)
 
-        for target_actor_params, actor_params in zip(self.actor_target.parameters(), self.actor.parameters()):
-            target_actor_params.data.copy_(self.polyak * target_actor_params.data + (1.0 - self.polyak) * actor_params.data)
+            for target_actor_params, actor_params in zip(self.actor_target.parameters(), self.actor.parameters()):
+                target_actor_params.data.copy_(self.polyak * target_actor_params.data + (1.0 - self.polyak) * actor_params.data)
         return actor_losses.mean().detach(), critic_losses.mean().detach(), values.mean().detach()
 
-    def _evaluate(self, episodes=5):
-        env = PickPlaceGoalPickLowDim(env_config=self.env_cfg, p=0)
+    def _evaluate(self, episodes=10):
+        env = PickPlaceGoalPick(env_config=self.env_cfg, p=0)
         successful_episodes = 0
         for _ in range(episodes):
             obs, goal = self.env.reset()
+            while self.reward_fn(self.env.get_achieved_goal_from_obs(obs), goal) == 0:
+                obs, goal = self.env.reset() # sample goal until it is not initially satisfied
             t = 0
             done = False
             while not done and t < self.episode_len:
@@ -351,7 +367,7 @@ class DDPGHERAgent:
     @staticmethod
     def _sync_network_parameters(net):
         comm = MPI.COMM_WORLD
-        params_np = np.concatenate([p.data.numpy().flatten() for p in net.parameters()])
+        params_np = np.concatenate([p.data.cpu().numpy().flatten() for p in net.parameters()])
         comm.Bcast(params_np, root=0)
         pos = 0
         for p in net.parameters():
@@ -363,7 +379,7 @@ class DDPGHERAgent:
     @staticmethod
     def _sync_network_grads(net):
         comm = MPI.COMM_WORLD
-        grads_np = np.concatenate([p.grad.numpy().flatten() for p in net.parameters()])
+        grads_np = np.concatenate([p.grad.cpu().numpy().flatten() for p in net.parameters()])
         global_grads = np.zeros_like(grads_np)
         comm.Allreduce(grads_np, global_grads, op=MPI.SUM)
         pos = 0
@@ -409,7 +425,7 @@ def main():
     env_cfg['initialization_noise'] = None
     
     if args.action == 'train':
-        env = PickPlaceGoalPickLowDim(env_config=env_cfg, p=0.5, move_object=args.move_object)
+        env = PickPlaceGoalPick(env_config=env_cfg, p=0.5, move_object=args.move_object)
         set_random_seeds(args.seed, env)
         agent = DDPGHERAgent(env=env, env_cfg=env_cfg, obs_dim=env.obs_dim, 
             episode_len=150,
@@ -431,7 +447,7 @@ def main():
             future_goals=int(args.k))
     elif args.action == 'rollout':
         env_cfg['has_renderer'] = True
-        env = PickPlaceGoalPickLowDim(env_config=env_cfg, p=0)
+        env = PickPlaceGoalPick(env_config=env_cfg, p=0)
         agent = DDPGHERAgent(env=env, env_cfg=env_cfg, obs_dim=env.obs_dim, 
             episode_len=150,
             action_dim=env.action_dim, 
