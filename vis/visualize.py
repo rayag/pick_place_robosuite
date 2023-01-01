@@ -45,7 +45,50 @@ def visualise_from_custom_progress_file(path):
     axis[1,2].legend(loc="upper left")
     axis[1,2].set_xlabel("Iteration")
     axis[1,2].set_ylabel("Completed episodes")
+    plt.show()
 
+def visualise_her_results(path):
+    progress = os.path.join(path, 'progress.csv')
+    epoch = os.path.join(path, "epoch.csv")
+    df = pd.read_csv(progress)
+    df_epoch = pd.read_csv(epoch)
+    iterations = df.size
+    epochs = df_epoch.size
+    figure, axis = plt.subplots(2, 3, figsize=(15, 8))
+    axis[0,0].plot(df_epoch['success_rate'] * 100, "-b")
+    axis[0,0].set_xlabel("Iteration")
+    axis[0,0].set_ylabel("Success rate (eval) %")
+    axis[0,0].set_title(path)
+
+    try:
+        axis[0,1].plot(df['actor_loss'])
+        axis[0,1].legend(loc="upper left")
+        axis[0,1].set_xlabel("Iteration")
+        axis[0,1].set_ylabel("Actor Loss")
+    except:
+        print("Missing actor loss")
+    try:
+        axis[1,0].plot(df['critic_loss'][100:])
+        axis[1,0].legend(loc="upper left")
+        axis[1,0].set_xlabel("Iteration")
+        axis[1,0].set_ylabel("Critic Loss")
+    except:
+        print("Missing Critic loss")
+
+    axis[1,1].plot(df['values'], "-b")
+    axis[1,1].legend(loc="upper left")
+    axis[1,1].set_xlabel("Iteration")
+    axis[1,1].set_ylabel("Mean Q")
+
+    axis[0,2].plot(df['complete_episodes'])
+    axis[0,2].legend(loc="upper left")
+    axis[0,2].set_xlabel("Iteration")
+    axis[0,2].set_ylabel("Completed episodes")
+    
+    axis[1,2].plot(calc_percent(df['complete_episodes'].to_numpy()))
+    axis[1,2].legend(loc="upper left")
+    axis[1,2].set_xlabel("Iteration")
+    axis[1,2].set_ylabel("Completed episodes")
     plt.show()
 
 def running_average(x, n = 10):
@@ -70,7 +113,7 @@ def calc_percent(x, n = 100):
 
 def main():
     # visulize_from_progress_csv("/home/raya/ray_results/DDPG_PickPlaceGrabbedCan_2022-11-21_23-40-413uklke4y/progress.csv")
-    visualise_from_custom_progress_file("./results/DDPG-HER-2022-12-19-00-35-28")
+    visualise_her_results("./results/DDPG-HER-2022-12-31-11-43-07")
 
 if __name__ == "__main__":
     main()
