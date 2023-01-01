@@ -21,16 +21,24 @@ def get_states_grabbed_can():
         return states_np
 
 class PickPlaceGoalPick(gym.Env):
-    def __init__(self, env_config=PICK_PLACE_DEFAULT_ENV_CFG, seed=None, p=1, move_object=True) -> None:
+    def __init__(self, env_config=PICK_PLACE_DEFAULT_ENV_CFG, seed=None, p=1, pg=0, move_object=True) -> None:
         super().__init__()
         self.env_wrapper = PickPlaceWrapper(env_config=env_config)
         self.env_wrapper.gym_env.seed(seed)
-        self.goal_dim = 3 # coordinates of the object
+        self.move_object = move_object
+        self.goal_dim = 3 if self.move_object else 6 # coordinates of the object
         self.observation_space = self.env_wrapper.gym_env.observation_space
         self.action_space = self.env_wrapper.gym_env.action_space
         self.goal = None
-        self.move_object = move_object
+        self.states_grabbed_can = np.empty(shape=(160,71))
         self.p = p
+        self.pg = pg
+
+    def load_states_with_object_grabbed(self):
+        self.states_grabbed_can = get_states_grabbed_can()
+
+    def set_states_with_object_grabbed(self, states):
+        self.states_grabbed_can = states.copy()
 
     def step(self, action):
         '''
@@ -40,13 +48,24 @@ class PickPlaceGoalPick(gym.Env):
         if self.move_object:
             return obs, self.extract_can_pos_from_obs(obs)
         else:
-            return obs, self.extract_eef_pos_from_obs(obs)
+            return obs, np.concatenate((self.extract_eef_pos_from_obs(obs), self.extract_can_pos_from_obs(obs)))
 
     def reset(self):
         '''
         return observation, desired goal
         '''
-        obs = self.env_wrapper.reset()
+        if np.random.rand() < self.pg:
+            i = np.random.randint(self.states_grabbed_can.shape[0])
+            obs = self.env_wrapper.reset_to(self.states_grabbed_can[i])
+            print(obs[42:44])
+            obs, _ = self.step([0,0,0,0,0,0,1])
+            print(obs[42:44])
+            obs, _ = self.step([0,0,0,0,0,0,1])
+            print(obs[42:44])
+            obs, _ = self.step([0,0,0,0,0,0,0.7])
+            print(obs[42:44])
+        else:
+            obs = self.env_wrapper.reset()
         self.goal = self.generate_goal_pick()
         return obs, self.goal
 
@@ -92,7 +111,7 @@ class PickPlaceGoalPick(gym.Env):
                 z = obj_pos[2] + np.random.uniform(low=0.1, high=0.2)
             return np.array([x,y,z])
         else:
-            return np.array([obj_pos[0], obj_pos[1], obj_pos[2]])
+            return np.array([obj_pos[0], obj_pos[1], obj_pos[2], obj_pos[0], obj_pos[1], obj_pos[2]])
 
     def calc_reward_can(self, state_goal):
         goal = state_goal[:self.goal_dim]
@@ -108,6 +127,13 @@ class PickPlaceGoalPick(gym.Env):
         goal_reached = np.linalg.norm(achieved_goal - desired_goal, axis=-1) < 0.02
         return 0.0 if goal_reached else -1.0
 
+    @staticmethod
+    def calc_reward_reach(achieved_goal, desired_goal):
+        x = np.linalg.norm(achieved_goal[3:] - desired_goal[3:], axis=-1)
+        goal_reached = np.linalg.norm(achieved_goal[:3] - desired_goal[:3], axis=-1) < 0.01\
+            and np.linalg.norm(achieved_goal[3:] - desired_goal[3:], axis=-1) < 0.003
+        return 0.0 if goal_reached else -1.0
+
     def render(self):
         self.env_wrapper.render()
 
@@ -118,13 +144,16 @@ class PickPlaceGoalPick(gym.Env):
         return obs[:3]
 
     def get_reward_fn(self):
-        return self.calc_reward_pick
+        if self.move_object:
+            return self.calc_reward_pick
+        else:
+            return self.calc_reward_reach
 
     def get_achieved_goal_from_obs(self, obs):
         if self.move_object:
             return self.extract_can_pos_from_obs(obs)
         else:
-            return self.extract_eef_pos_from_obs(obs)
+            return np.concatenate((self.extract_eef_pos_from_obs(obs), self.extract_can_pos_from_obs(obs)))
     
     def set_seed(self, seed):
         self.env_wrapper.gym_env.seed(seed)
@@ -194,12 +223,8 @@ def inspect_observations(visualize = False):
                 obs, achieved_goal = env.step(action)
                 reward = env.calc_reward_pick(achieved_goal, goal)
                 done = reward == 0.0
-                eef_pod = env.extract_eef_pos_from_obs(obs)
-                can_pos = env.extract_can_pos_from_obs(obs)
-                touching = np.linalg.norm(eef_pod - can_pos) < 0.02
-                if touching:
-                    dist.append(eef_pod - can_pos)
-                print(f"Reward {reward} DG {goal} AG {achieved_goal} {env.extract_can_pos_from_obs(obs_data[t])}")
+                if done:
+                    break
                 ep_return += reward
                 t = t + 1
                 if visualize:
@@ -207,17 +232,27 @@ def inspect_observations(visualize = False):
         dist = np.array(dist)
         print(f"Mean dist: {np.mean(dist, axis=0)} Max: {np.max(dist, axis=0)}")
 
+def sync_envs(env: PickPlaceGoalPick):
+    comm = MPI.COMM_WORLD
+    if comm.Get_rank() == 0:
+        env.load_states_with_object_grabbed()
+    states_np = np.copy(env.states_grabbed_can)
+    comm.Bcast([states_np, MPI.DOUBLE], root=0)
+    env.set_states_with_object_grabbed(states_np)
+
 
 def main():
     inspect_observations(True)
     # cfg = PICK_PLACE_DEFAULT_ENV_CFG
     # cfg['has_renderer'] = True
     # cfg['initialization_noise'] = 'default'
-    # env = PickPlaceGoalPick()
+    # env = PickPlaceGoalPick(pg=1)
+    # env.load_states_with_object_grabbed()
     # for i in range(10):
     #     env.reset()
     #     env.render()
     #     time.sleep(5)
+    #     print()
     
 
 if __name__ == "__main__":
