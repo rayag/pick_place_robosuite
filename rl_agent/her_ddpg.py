@@ -181,7 +181,6 @@ class DDPGHERAgent:
                 action_dateched = action.cpu().detach().numpy()\
                     .clip(env.actions_low, env.actions_high)
                 next_obs, achieved_goal = env.step(action_dateched)
-                print(f"Achieved goal: {achieved_goal}")
                 reward = self.reward_fn(achieved_goal, goal)
                 done = (reward == 0)
                 obs = next_obs
@@ -292,7 +291,8 @@ class DDPGHERAgent:
             beh_policy_prob = np.max([0.1, 0.95*beh_policy_prob])
             end_epoch = time.time()
             success_rate_eval = self._evaluate()
-            exploration_eps = exploration_eps * exploration_eps_decay
+            if epoch > 0 and epoch % 5 == 0:
+                exploration_eps = exploration_eps * exploration_eps_decay
             if MPI.COMM_WORLD.Get_rank() == 0:
                 self._save(epoch)
                 self.logger.print_and_log_output(f"Epoch: {epoch} Success rate (eval) {success_rate_eval} Duration: {end_epoch-start_epoch}s")
