@@ -16,6 +16,7 @@ class HERReplayBuffer:
         sample_strategy: None, 
         obs_normalizer: Normalizer,
         goal_normalizar: Normalizer,
+        reward_dim: int=1,
         normalize_data: bool = False) -> None:
         self.max_episodes = capacity // episode_len
         self.episode_len = episode_len
@@ -29,7 +30,7 @@ class HERReplayBuffer:
         self.obs = np.zeros([self.capacity, obs_dim], dtype=np.float32)
         self.actions = np.zeros([self.capacity, action_dim], dtype=np.float32)
         self.next_obs = np.zeros([self.capacity, obs_dim], dtype=np.float32)
-        self.rewards = np.zeros([self.capacity, 1], dtype=np.float32)
+        self.rewards = np.zeros([self.capacity, reward_dim], dtype=np.float32)
         self.desired_goals = np.zeros([self.capacity, goal_dim], dtype=np.float32)
         self.achieved_goals = np.zeros([self.capacity, goal_dim], dtype=np.float32)
 
@@ -111,6 +112,40 @@ class HERReplayBuffer:
                 acts[goal_t:,:] = 0
                 ep_obs[goal_t:, :] = ep_obs_data[goal_t-1]
                 ep_next_obs[goal_t:, :] = ep_next_obs_data[goal_t-1]
+                ag = ep_next_obs[:, :3] # TODO replace this with the original function
+                dg = np.full_like(ag, fill_value=goal)
+                rewards = np.full(shape=(ag.shape[0], 1), fill_value=-1)
+                for t in range(episode_len):
+                    rewards[t] = env.calc_reward_pick(ag[t], dg[t])
+                self.add_episode(ep_obs[:episode_len], acts[:episode_len], ep_next_obs[:episode_len], 
+                    rewards[:episode_len], ag[:episode_len], dg[:episode_len])
+
+
+    def load_demonstration_reach(self, env, episode_len, action_dim):
+        with h5py.File(DEMO_PATH, "r+") as f:
+            episodes = list(f['data'].keys())
+            for i in range(len(episodes)):
+                ep = episodes[i]
+                acts_data = f["data/{}/actions".format(ep)][()]
+                acts = np.zeros(shape=(episode_len, )) 
+
+                ep_obs_data = f["data/{}/obs_flat".format(ep)][()]
+                ep_obs = np.zeros(shape=(episode_len, ep_obs_data.shape[1]))
+
+                ep_next_obs_data = f["data/{}/next_obs_flat".format(ep)][()]
+                ep_next_obs = np.zeros(shape=(episode_len, ep_obs_data.shape[1]))
+
+                current_episode_len = np.min([episode_len, ep_obs_data.shape[0]])
+                if action_dim == 4:
+                    acts[:current_episode_len, :] = acts_data[:current_episode_len, :]
+                    acts[:current_episode_len,4:-1] = 0
+                else:
+                    acts[:current_episode_len, :] = acts_data[:current_episode_len, :]
+                ep_obs[:current_episode_len, :] = ep_obs_data[:current_episode_len, :]
+                ep_next_obs[:current_episode_len, :] = ep_next_obs_data[:current_episode_len, :]
+
+                goal = np.concatenate((env.extract_can_pos_from_obs(), [1]))
+                
                 ag = ep_next_obs[:, :3] # TODO replace this with the original function
                 dg = np.full_like(ag, fill_value=goal)
                 rewards = np.full(shape=(ag.shape[0], 1), fill_value=-1)
