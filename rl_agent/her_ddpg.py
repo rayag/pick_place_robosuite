@@ -42,13 +42,14 @@ class ActorNetworkLowDim(nn.Module):
     def __init__(self, obs_dim, action_dim, action_high = 1.0, action_low = 0.0) -> None:
         super(ActorNetworkLowDim, self).__init__()
         self.action_dim = action_dim
-        self.action_high = torch.FloatTensor(np.array([1,1,1,1])).to(device)
-        self.action_low = torch.FloatTensor(np.array([-1,-1,-1,-1])).to(device)
+        self.action_low_dim = 3
+        self.action_high = torch.FloatTensor(np.full(shape=(self.action_low_dim), fill_value=1)).to(device)
+        self.action_low = torch.FloatTensor(np.full(shape=(self.action_low_dim), fill_value=-1)).to(device)
         self.input = nn.Linear(obs_dim, 256).to(device) #TODO: allow custom layer sizes
         self.h1 = nn.Linear(256, 256).to(device)
         self.h2 = nn.Linear(256, 256).to(device)
         self.h3 = nn.Linear(256, 256).to(device)
-        self.output = nn.Linear(256, 4).to(device)
+        self.output = nn.Linear(256, self.action_low_dim).to(device)
 
     def forward(self, obs):
         x = F.relu(self.input(obs))
@@ -59,11 +60,11 @@ class ActorNetworkLowDim(nn.Module):
         if len(action.size())==1:
             action_full = torch.zeros(self.action_dim)
             action_full[:3] = action[:3]
-            action_full[-1] = action[-1]
+            # action_full[-1] = action[-1]
         if len(action.size()) == 2:
             action_full = torch.zeros(action.size()[0], self.action_dim)
             action_full[:,:3] = action[:,:3]
-            action_full[:,-1] = action[:,-1]
+            # action_full[:,-1] = action[:,-1]
         return action_full
 
 class CriticNetwork(nn.Module):
@@ -76,6 +77,28 @@ class CriticNetwork(nn.Module):
         self.output = nn.Linear(256, 1).to(device)
 
     def forward(self, sg, a):
+        x = F.relu(self.input(torch.cat([sg, a], 1)))
+        x = F.relu(self.h1(x))
+        x = F.relu(self.h2(x))
+        x = F.relu(self.h3(x))
+        out = self.output(x)
+        return out
+
+class CriticNetworkLowDim(nn.Module):
+    def __init__(self, obs_dim, action_dim, goal_dim) -> None:
+        super().__init__()
+        self.low_dim = 3
+        self.input = nn.Linear(obs_dim + goal_dim + self.low_dim, 256).to(device)
+        self.h1 = nn.Linear(256, 256).to(device)
+        self.h2 = nn.Linear(256, 256).to(device)
+        self.h3 = nn.Linear(256, 256).to(device)
+        self.output = nn.Linear(256, 1).to(device)
+
+    def forward(self, sg, a):
+        if len(a.size()) == 1:
+            a = a[:self.low_dim]
+        elif len(a.size()) == 2:
+            a = a[:, :self.low_dim]
         x = F.relu(self.input(torch.cat([sg, a], 1)))
         x = F.relu(self.h1(x))
         x = F.relu(self.h2(x))
@@ -109,8 +132,8 @@ class DDPGHERAgent:
             action_low=self.env.actions_low, action_high=self.env.actions_high)
         self.actor_target = ActorNetworkLowDim(obs_dim=self.obs_dim + self.goal_dim, action_dim=self.action_dim,
             action_low=self.env.actions_low, action_high=self.env.actions_high)
-        self.critic = CriticNetwork(self.obs_dim, self.action_dim, self.goal_dim)
-        self.critic_target = CriticNetwork(self.obs_dim, self.action_dim, self.goal_dim)
+        self.critic = CriticNetworkLowDim(self.obs_dim, self.action_dim, self.goal_dim)
+        self.critic_target = CriticNetworkLowDim(self.obs_dim, self.action_dim, self.goal_dim)
 
         if checkpoint_dir is not None and MPI.COMM_WORLD.Get_rank() == 0:
             self._load_from(checkpoint_dir)
@@ -290,12 +313,15 @@ class DDPGHERAgent:
                 self.logger.add(reward, actor_loss, critic_loss, iteration_success_count, value)
             beh_policy_prob = np.max([0.1, 0.95*beh_policy_prob])
             end_epoch = time.time()
-            success_rate_eval = self._evaluate()
             if epoch > 0 and epoch % 5 == 0:
+                success_rate_eval = self._evaluate()
                 exploration_eps = exploration_eps * exploration_eps_decay
+                if MPI.COMM_WORLD.Get_rank() == 0:
+                    self.logger.add_epoch_data(success_rate_eval)
+                    self.logger.print_and_log_output(f"Epoch: {epoch} Success rate (eval) {success_rate_eval}")
             if MPI.COMM_WORLD.Get_rank() == 0:
                 self._save(epoch)
-                self.logger.print_and_log_output(f"Epoch: {epoch} Success rate (eval) {success_rate_eval} Duration: {end_epoch-start_epoch}s")
+                self.logger.print_and_log_output(f"Epoch: {epoch} Duration: {end_epoch-start_epoch}s")
                 self.logger.add_epoch_data(success_rate_eval)
 
     def update(self, single_worker = False):
@@ -348,6 +374,8 @@ class DDPGHERAgent:
 
     def _evaluate(self, episodes=10):
         env = self.env
+        old_pg = self.env.pg
+        self.env.pg = 0
         successful_episodes = 0
         for _ in range(episodes):
             obs, goal = self.env.reset()
@@ -374,6 +402,7 @@ class DDPGHERAgent:
         print(f"{MPI.COMM_WORLD.Get_rank()} Success rate = {local_success_rate}")
         global_success_rate = MPI.COMM_WORLD.allreduce(local_success_rate, op=MPI.SUM)
         global_success_rate /= MPI.COMM_WORLD.Get_size()
+        self.env.pg = old_pg
         return global_success_rate
 
 
@@ -482,7 +511,7 @@ def main():
     env_cfg['initialization_noise'] = None
     
     if args.action == 'train':
-        env = PickPlaceGoalPick(env_config=env_cfg, p=0, pg=0.5, move_object=args.move_object)
+        env = PickPlaceGoalPick(env_config=env_cfg, p=0, pg=0.5 if args.move_object else 0, move_object=args.move_object)
         sync_envs(env)
         set_random_seeds(args.seed, env)
         agent = DDPGHERAgent(env=env, env_cfg=env_cfg, obs_dim=env.obs_dim, 
