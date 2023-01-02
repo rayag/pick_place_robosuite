@@ -181,6 +181,7 @@ class DDPGHERAgent:
                 action_dateched = action.cpu().detach().numpy()\
                     .clip(env.actions_low, env.actions_high)
                 next_obs, achieved_goal = env.step(action_dateched)
+                print(f"Achieved goal: {achieved_goal}")
                 reward = self.reward_fn(achieved_goal, goal)
                 done = (reward == 0)
                 obs = next_obs
@@ -226,6 +227,7 @@ class DDPGHERAgent:
             self._sync_network_parameters(self.critic_target)
 
         beh_policy_prob = 0.8
+        exploration_eps_decay = 0.98
         for epoch in range(epochs):
             if MPI.COMM_WORLD.Get_rank() == 0:
                 self.logger.print_and_log_output(f"Starting epoch {epoch}, behavioral policy probability: {beh_policy_prob}")
@@ -290,6 +292,7 @@ class DDPGHERAgent:
             beh_policy_prob = np.max([0.1, 0.95*beh_policy_prob])
             end_epoch = time.time()
             success_rate_eval = self._evaluate()
+            exploration_eps = exploration_eps * exploration_eps_decay
             if MPI.COMM_WORLD.Get_rank() == 0:
                 self._save(epoch)
                 self.logger.print_and_log_output(f"Epoch: {epoch} Success rate (eval) {success_rate_eval} Duration: {end_epoch-start_epoch}s")
@@ -479,8 +482,8 @@ def main():
     env_cfg['initialization_noise'] = None
     
     if args.action == 'train':
-        env = PickPlaceGoalPick(env_config=env_cfg, p=0, pg=0, move_object=args.move_object)
-        # sync_envs(env)
+        env = PickPlaceGoalPick(env_config=env_cfg, p=0, pg=0.5, move_object=args.move_object)
+        sync_envs(env)
         set_random_seeds(args.seed, env)
         agent = DDPGHERAgent(env=env, env_cfg=env_cfg, obs_dim=env.obs_dim, 
             episode_len=150,

@@ -26,7 +26,7 @@ class PickPlaceGoalPick(gym.Env):
         self.env_wrapper = PickPlaceWrapper(env_config=env_config)
         self.env_wrapper.gym_env.seed(seed)
         self.move_object = move_object
-        self.goal_dim = 3 if self.move_object else 6 # coordinates of the object
+        self.goal_dim = 3 if self.move_object else 4 # coordinates of the object
         self.observation_space = self.env_wrapper.gym_env.observation_space
         self.action_space = self.env_wrapper.gym_env.action_space
         self.goal = None
@@ -48,7 +48,9 @@ class PickPlaceGoalPick(gym.Env):
         if self.move_object:
             return obs, self.extract_can_pos_from_obs(obs)
         else:
-            return obs, np.concatenate((self.extract_eef_pos_from_obs(obs), self.extract_can_pos_from_obs(obs)))
+            _, grasp,_, _ = self.env_wrapper.gym_env.env.staged_rewards()
+            grasped = np.array([1 if grasp > 0 else 0])
+            return obs, np.concatenate((self.extract_eef_pos_from_obs(obs), grasped))
 
     def reset(self):
         '''
@@ -57,13 +59,9 @@ class PickPlaceGoalPick(gym.Env):
         if np.random.rand() < self.pg:
             i = np.random.randint(self.states_grabbed_can.shape[0])
             obs = self.env_wrapper.reset_to(self.states_grabbed_can[i])
-            print(obs[42:44])
             obs, _ = self.step([0,0,0,0,0,0,1])
-            print(obs[42:44])
             obs, _ = self.step([0,0,0,0,0,0,1])
-            print(obs[42:44])
             obs, _ = self.step([0,0,0,0,0,0,0.7])
-            print(obs[42:44])
         else:
             obs = self.env_wrapper.reset()
         self.goal = self.generate_goal_pick()
@@ -111,7 +109,7 @@ class PickPlaceGoalPick(gym.Env):
                 z = obj_pos[2] + np.random.uniform(low=0.1, high=0.2)
             return np.array([x,y,z])
         else:
-            return np.array([obj_pos[0], obj_pos[1], obj_pos[2], obj_pos[0], obj_pos[1], obj_pos[2]])
+            return np.array([obj_pos[0], obj_pos[1], obj_pos[2], 1])
 
     def calc_reward_can(self, state_goal):
         goal = state_goal[:self.goal_dim]
@@ -153,7 +151,7 @@ class PickPlaceGoalPick(gym.Env):
         if self.move_object:
             return self.extract_can_pos_from_obs(obs)
         else:
-            return np.concatenate((self.extract_eef_pos_from_obs(obs), self.extract_can_pos_from_obs(obs)))
+            return np.concatenate((self.extract_eef_pos_from_obs(obs), [1]))
     
     def set_seed(self, seed):
         self.env_wrapper.gym_env.seed(seed)
