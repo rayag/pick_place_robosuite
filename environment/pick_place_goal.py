@@ -142,7 +142,10 @@ class PickPlaceGoalPick(gym.Env):
         return np.concatenate((self.extract_eef_pos_from_obs(obs), self.extract_can_pos_from_obs(obs)))
 
     def get_reward_fn(self):
-        return self.calc_reward_pick
+        if self.move_object:
+            return self.calc_reward_pick
+        else:
+            return self.calc_reward_reach
 
     # def get_achieved_goal_from_obs(self, obs):
     #     if self.move_object:

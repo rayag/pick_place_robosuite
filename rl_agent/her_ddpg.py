@@ -379,7 +379,6 @@ class DDPGHERAgent:
             obs, goal = self.env.reset()
             while self.reward_fn(self.env.get_achieved_goal_from_obs(obs), goal) == 0:
                 obs, goal = self.env.reset() # sample goal until it is not initially satisfied
-            print(f"Goal: {goal}")
             t = 0
             done = False
             ep_return = 0
