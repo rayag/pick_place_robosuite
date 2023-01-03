@@ -60,10 +60,12 @@ class ActorNetworkLowDim(nn.Module):
         if len(action.size())==1:
             action_full = torch.zeros(self.action_dim)
             action_full[:3] = action[:3]
+            action_full[-1] = -1
             # action_full[-1] = action[-1]
         if len(action.size()) == 2:
             action_full = torch.zeros(action.size()[0], self.action_dim)
             action_full[:,:3] = action[:,:3]
+            action_full[:,-1] = -1
             # action_full[:,-1] = action[:,-1]
         return action_full
 
@@ -187,9 +189,10 @@ class DDPGHERAgent:
 
     def rollout(self, episodes = 10, steps = 250):
         # env = PickPlaceGoalPick(env_config=self.env_cfg, p=0, pg=0, move_object=True)
-        env = self.env
+        old_pg = self.env.pg
+        self.env.pg = 0
         for ep in range(episodes):
-            obs, goal = env.reset()
+            obs, goal = self.env.reset()
             print(f"Goal: {goal}")
             t = 0
             done = False
@@ -202,15 +205,16 @@ class DDPGHERAgent:
                 obs_goal_norm_torch = torch.FloatTensor(np.concatenate((obs_norm, goal_norm))).to(device)
                 action = self.actor(obs_goal_norm_torch)
                 action_dateched = action.cpu().detach().numpy()\
-                    .clip(env.actions_low, env.actions_high)
-                next_obs, achieved_goal = env.step(action_dateched)
+                    .clip(self.env.actions_low, self.env.actions_high)
+                next_obs, achieved_goal = self.env.step(action_dateched)
                 reward = self.reward_fn(achieved_goal, goal)
                 done = (reward == 0)
                 obs = next_obs
                 t += 1
                 ep_return += reward
-                env.render()
-            print(f"Episode {ep}: return {ep_return}")
+                self.env.render()
+            print(f"Episode {ep}: return {ep_return} done {done}")
+        self.env.pg = old_pg
 
     def _run_policy_till_completion(self, env, obs, goal, render=False):
         done = False
@@ -370,33 +374,34 @@ class DDPGHERAgent:
         return actor_losses.mean().detach(), critic_losses.mean().detach(), values.mean().detach()
 
     def _evaluate(self, episodes=10):
-        env = self.env
         old_pg = self.env.pg
         self.env.pg = 0
         successful_episodes = 0
-        for _ in range(episodes):
+        for ep in range(episodes):
             obs, goal = self.env.reset()
             while self.reward_fn(self.env.get_achieved_goal_from_obs(obs), goal) == 0:
                 obs, goal = self.env.reset() # sample goal until it is not initially satisfied
+            print(f"Goal: {goal}")
             t = 0
             done = False
-            # obs, _ = self._run_policy_till_completion(env, obs, env.extract_can_pos_from_obs(obs))
+            ep_return = 0
             while not done and t < self.episode_len:
                 obs_norm = np.squeeze(self.obs_normalizer.normalize(obs))
                 goal_norm = np.squeeze(self.goal_normalizer.normalize(goal))
                 obs_goal_norm_torch = torch.FloatTensor(np.concatenate((obs_norm, goal_norm))).to(device)
                 action = self.actor(obs_goal_norm_torch)
                 action_dateched = action.cpu().detach().numpy()\
-                    .clip(self.env.actions_low, self.env.actions_low)
-                next_obs, achieved_goal = env.step(action_dateched)
+                    .clip(self.env.actions_low, self.env.actions_high)
+                next_obs, achieved_goal = self.env.step(action_dateched)
                 reward = self.reward_fn(achieved_goal, goal)
                 done = (reward == 0)
                 obs = next_obs
                 t += 1
+                ep_return += reward
             if done:
                 successful_episodes += 1
         local_success_rate = successful_episodes / episodes
-        print(f"{MPI.COMM_WORLD.Get_rank()} Success rate = {local_success_rate}")
+        print(f"{MPI.COMM_WORLD.Get_rank()} success rate {local_success_rate}")
         global_success_rate = MPI.COMM_WORLD.allreduce(local_success_rate, op=MPI.SUM)
         global_success_rate /= MPI.COMM_WORLD.Get_size()
         self.env.pg = old_pg
@@ -544,7 +549,7 @@ def main():
             checkpoint_dir=args.checkpoint,
             behavioral_policy_dir=args.beh_pi,
             descr='ROLLOUT')
-        agent.rollout(steps=150)
+        agent.rollout(episodes=10, steps=150)
 
 if __name__ == '__main__':
     main()

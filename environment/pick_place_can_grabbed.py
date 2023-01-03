@@ -15,9 +15,6 @@ def put_states_in_file():
     env_cfg = PICK_PLACE_DEFAULT_ENV_CFG
     env_cfg['pick_only'] = True
     env = PickPlaceWrapper(env_config=env_cfg)
-    env1_cfg = env_cfg.copy()
-    env1_cfg['has_renderer']=True
-    env1 = PickPlaceWrapper(env_config=env1_cfg)
     with h5py.File(DEMO_PATH, "r") as f:
         with h5py.File(GRABBED_PATH, "r+") as g:
             demos = list(f['data'].keys())
@@ -37,7 +34,6 @@ def put_states_in_file():
                     if done:
                         del g[f"states/{j}"]
                         g.create_dataset(f"states/{j}", data=np.array(states[t]))
-                        time.sleep(4)
                         j = j + 1
                     t = t+1
 
@@ -82,14 +78,14 @@ class PickPlaceGrabbedCan(PickPlaceWrapper):
 
 
 def main():
-    # put_states_in_file()
-    cfg = PICK_PLACE_DEFAULT_ENV_CFG
-    cfg['has_renderer'] = True
-    env = PickPlaceGrabbedCan()
-    for i in range(10):
-        env.reset()
-        env.render()
-        time.sleep(5)
+    put_states_in_file()
+    # cfg = PICK_PLACE_DEFAULT_ENV_CFG
+    # cfg['has_renderer'] = True
+    # env = PickPlaceGrabbedCan()
+    # for i in range(10):
+    #     env.reset()
+    #     env.render()
+    #     time.sleep(5)
     
 
 if __name__ == "__main__":
