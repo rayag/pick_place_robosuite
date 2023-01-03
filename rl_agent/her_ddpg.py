@@ -313,15 +313,12 @@ class DDPGHERAgent:
                 self.logger.add(reward, actor_loss, critic_loss, iteration_success_count, value)
             beh_policy_prob = np.max([0.1, 0.95*beh_policy_prob])
             end_epoch = time.time()
+            success_rate_eval = self._evaluate(10 if self.proc_count <= 4 else 5)
             if epoch > 0 and epoch % 5 == 0:
-                success_rate_eval = self._evaluate()
                 exploration_eps = exploration_eps * exploration_eps_decay
-                if MPI.COMM_WORLD.Get_rank() == 0:
-                    self.logger.add_epoch_data(success_rate_eval)
-                    self.logger.print_and_log_output(f"Epoch: {epoch} Success rate (eval) {success_rate_eval}")
             if MPI.COMM_WORLD.Get_rank() == 0:
                 self._save(epoch)
-                self.logger.print_and_log_output(f"Epoch: {epoch} Duration: {end_epoch-start_epoch}s")
+                self.logger.print_and_log_output(f"Epoch: {epoch} Success rate (eval) {success_rate_eval} Duration: {end_epoch-start_epoch}s")
                 self.logger.add_epoch_data(success_rate_eval)
 
     def update(self, single_worker = False):

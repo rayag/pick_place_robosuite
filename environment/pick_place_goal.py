@@ -26,7 +26,7 @@ class PickPlaceGoalPick(gym.Env):
         self.env_wrapper = PickPlaceWrapper(env_config=env_config)
         self.env_wrapper.gym_env.seed(seed)
         self.move_object = move_object
-        self.goal_dim = 3 if self.move_object else 4 # coordinates of the object
+        self.goal_dim = 3 # coordinates of the object
         self.observation_space = self.env_wrapper.gym_env.observation_space
         self.action_space = self.env_wrapper.gym_env.action_space
         self.goal = None
@@ -48,9 +48,7 @@ class PickPlaceGoalPick(gym.Env):
         if self.move_object:
             return obs, self.extract_can_pos_from_obs(obs)
         else:
-            _, grasp,_, _ = self.env_wrapper.gym_env.env.staged_rewards()
-            grasped = np.array([1 if grasp > 0 else 0])
-            return obs, np.concatenate((self.extract_eef_pos_from_obs(obs), grasped))
+            return obs, self.extract_eef_pos_from_obs(obs)
 
     def reset(self):
         '''
@@ -109,7 +107,7 @@ class PickPlaceGoalPick(gym.Env):
                 z = obj_pos[2] + np.random.uniform(low=0.1, high=0.2)
             return np.array([x,y,z])
         else:
-            return np.array([obj_pos[0], obj_pos[1], obj_pos[2], 1])
+            return np.array([obj_pos[0], obj_pos[1], obj_pos[2] + np.random.uniform(low=0, high=0.003)])
 
     def calc_reward_can(self, state_goal):
         goal = state_goal[:self.goal_dim]
@@ -142,16 +140,13 @@ class PickPlaceGoalPick(gym.Env):
         return obs[:3]
 
     def get_reward_fn(self):
-        if self.move_object:
-            return self.calc_reward_pick
-        else:
-            return self.calc_reward_reach
+        return self.calc_reward_pick
 
     def get_achieved_goal_from_obs(self, obs):
         if self.move_object:
             return self.extract_can_pos_from_obs(obs)
         else:
-            return np.concatenate((self.extract_eef_pos_from_obs(obs), [1]))
+            return self.extract_eef_pos_from_obs(obs)
     
     def set_seed(self, seed):
         self.env_wrapper.gym_env.seed(seed)
