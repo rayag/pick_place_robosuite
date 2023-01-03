@@ -1,6 +1,7 @@
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
+import argparse
 import os
 
 def visualise_from_custom_progress_file(path):
@@ -113,7 +114,10 @@ def calc_percent(x, n = 100):
 
 def main():
     # visulize_from_progress_csv("/home/raya/ray_results/DDPG_PickPlaceGrabbedCan_2022-11-21_23-40-413uklke4y/progress.csv")
-    visualise_her_results("./results/DDPG-HER-2022-12-31-11-43-07")
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-d', help='directory of the progress file') 
+    args = parser.parse_args()
+    visualise_her_results(args.d)
 
 if __name__ == "__main__":
     main()
