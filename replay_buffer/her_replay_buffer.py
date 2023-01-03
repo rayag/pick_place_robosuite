@@ -2,7 +2,7 @@ import numpy as np
 import threading
 import h5py
 from replay_buffer.normalizer import Normalizer
-from environment.pick_place_goal import DEMO_PATH, get_goal
+from environment.pick_place_goal import DEMO_PATH, get_goal    
 
 class HERReplayBuffer:
     def __init__(self, 

@@ -26,7 +26,8 @@ class PickPlaceGoalPick(gym.Env):
         self.env_wrapper = PickPlaceWrapper(env_config=env_config)
         self.env_wrapper.gym_env.seed(seed)
         self.move_object = move_object
-        self.goal_dim = 3 # coordinates of the object
+        self.discard_gripper = not move_object
+        self.goal_dim = 6 # coordinates of the object
         self.observation_space = self.env_wrapper.gym_env.observation_space
         self.action_space = self.env_wrapper.gym_env.action_space
         self.goal = None
@@ -44,11 +45,10 @@ class PickPlaceGoalPick(gym.Env):
         '''
         returns next observation, achieved_goal
         '''
+        if self.discard_gripper:
+            action[-1] = -1 # keep open
         obs, _, done, info = self.env_wrapper.step(action)
-        if self.move_object:
-            return obs, self.extract_can_pos_from_obs(obs)
-        else:
-            return obs, self.extract_eef_pos_from_obs(obs)
+        return obs, self.get_achieved_goal_from_obs(obs)
 
     def reset(self):
         '''
@@ -96,18 +96,15 @@ class PickPlaceGoalPick(gym.Env):
     def generate_goal_pick(self):
         rs_env = self.env_wrapper.gym_env.env
         obj_pos = rs_env.sim.data.body_xpos[rs_env.obj_body_id['Can']]
-        if self.move_object:
-            x = obj_pos[0] + np.random.uniform(low=0.02, high=0.2)
-            y = obj_pos[1] + np.random.uniform(low=0.02, high=0.2)
-            # sometimes the goal should be on the table
-            prob = np.random.rand()
-            if (prob < self.p or not self.move_object):
-                z = obj_pos[2]
-            else:
-                z = obj_pos[2] + np.random.uniform(low=0.1, high=0.2)
-            return np.array([x,y,z])
+        x = obj_pos[0] + np.random.uniform(low=0.02, high=0.2)
+        y = obj_pos[1] + np.random.uniform(low=0.02, high=0.2)
+        # sometimes the goal should be on the table
+        prob = np.random.rand()
+        if (prob < self.p or not self.move_object):
+            z = obj_pos[2]
         else:
-            return np.array([obj_pos[0], obj_pos[1], obj_pos[2] + np.random.uniform(low=0, high=0.003)])
+            z = obj_pos[2] + np.random.uniform(low=0.1, high=0.2)
+        return np.array([obj_pos[0], obj_pos[1], obj_pos[2] + np.random.uniform(low=0, high=0.003), x,y,z])
 
     def calc_reward_can(self, state_goal):
         goal = state_goal[:self.goal_dim]
@@ -120,14 +117,16 @@ class PickPlaceGoalPick(gym.Env):
 
     @staticmethod
     def calc_reward_pick(achieved_goal, desired_goal):
+        achieved_goal = achieved_goal[3:]
+        desired_goal = desired_goal[3:]
         goal_reached = np.linalg.norm(achieved_goal - desired_goal, axis=-1) < 0.015
         return 0.0 if goal_reached else -1.0
 
     @staticmethod
     def calc_reward_reach(achieved_goal, desired_goal):
-        x = np.linalg.norm(achieved_goal[3:] - desired_goal[3:], axis=-1)
-        goal_reached = np.linalg.norm(achieved_goal[:3] - desired_goal[:3], axis=-1) < 0.01\
-            and np.linalg.norm(achieved_goal[3:] - desired_goal[3:], axis=-1) < 0.003
+        achieved_goal = achieved_goal[:3]
+        desired_goal = desired_goal[:3]
+        goal_reached = np.linalg.norm(achieved_goal - desired_goal, axis=-1) < 0.015
         return 0.0 if goal_reached else -1.0
 
     def render(self):
@@ -139,14 +138,17 @@ class PickPlaceGoalPick(gym.Env):
     def extract_can_pos_from_obs(self, obs):
         return obs[:3]
 
+    def get_achieved_goal_from_obs(self, obs):
+        return np.concatenate((self.extract_eef_pos_from_obs(obs), self.extract_can_pos_from_obs(obs)))
+
     def get_reward_fn(self):
         return self.calc_reward_pick
 
-    def get_achieved_goal_from_obs(self, obs):
-        if self.move_object:
-            return self.extract_can_pos_from_obs(obs)
-        else:
-            return self.extract_eef_pos_from_obs(obs)
+    # def get_achieved_goal_from_obs(self, obs):
+    #     if self.move_object:
+    #         return self.extract_can_pos_from_obs(obs)
+    #     else:
+    #         return self.extract_eef_pos_from_obs(obs)
     
     def set_seed(self, seed):
         self.env_wrapper.gym_env.seed(seed)

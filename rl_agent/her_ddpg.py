@@ -60,13 +60,11 @@ class ActorNetworkLowDim(nn.Module):
         if len(action.size())==1:
             action_full = torch.zeros(self.action_dim)
             action_full[:3] = action[:3]
-            action_full[-1] = -1
-            # action_full[-1] = action[-1]
+            action_full[-1] = action[-1]
         if len(action.size()) == 2:
             action_full = torch.zeros(action.size()[0], self.action_dim)
             action_full[:,:3] = action[:,:3]
-            action_full[:,-1] = -1
-            # action_full[:,-1] = action[:,-1]
+            action_full[:,-1] = action[:,-1]
         return action_full
 
 class CriticNetwork(nn.Module):
