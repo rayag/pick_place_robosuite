@@ -284,6 +284,7 @@ class DDPGHERAgent:
             ep_achieved_goals[t] = achieved_goal
             ep_desired_goals[t] = original_goal
             obs = next_obs
+            t = t+1
         self.replay_buffer.add_episode(ep_obs, ep_actions, ep_next_obs, ep_rewards, ep_achieved_goals, ep_desired_goals)
 
 
