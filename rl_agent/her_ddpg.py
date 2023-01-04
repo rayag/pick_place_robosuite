@@ -322,7 +322,7 @@ class DDPGHERAgent:
                         continue # we discard episodes in which the goal has been satisfied
                     started_episodes += 1
 
-                    if np.random.rand() < beh_policy_prob:
+                    if self.behavioral_policy is not None and np.random.rand() < beh_policy_prob:
                         self.generate_episode_with_beh_policy()
                         continue
                         
