@@ -31,7 +31,7 @@ class PickPlaceGoalPick(gym.Env):
         self.observation_space = self.env_wrapper.gym_env.observation_space
         self.action_space = self.env_wrapper.gym_env.action_space
         self.goal = None
-        self.states_grabbed_can = np.empty(shape=(160,71))
+        self.states_grabbed_can = np.empty(shape=(160,71)) # TODO: remove magic
         self.p = p
         self.pg = pg
 
@@ -126,7 +126,7 @@ class PickPlaceGoalPick(gym.Env):
     def calc_reward_reach(achieved_goal, desired_goal):
         achieved_goal = achieved_goal[:3]
         desired_goal = desired_goal[:3]
-        goal_reached = np.linalg.norm(achieved_goal - desired_goal, axis=-1) < 0.015
+        goal_reached = np.linalg.norm(achieved_goal - desired_goal, axis=-1) < 0.005
         return 0.0 if goal_reached else -1.0
 
     def render(self):

@@ -149,7 +149,7 @@ class DDPGHERAgent:
         self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=critic_lr)
 
         if behavioral_policy_dir is not None:
-            self.behavioral_policy = ActorNetwork(obs_dim=self.obs_dim + self.goal_dim, action_dim=self.action_dim, 
+            self.behavioral_policy = ActorNetworkLowDim(obs_dim=self.obs_dim + self.goal_dim, action_dim=self.action_dim, 
                 action_low=self.env.actions_low, action_high=self.env.actions_high)
             self._load_behavioural_policy(behavioral_policy_dir)
             # self._load_from(behavioral_policy_dir)
@@ -211,6 +211,14 @@ class DDPGHERAgent:
                 t += 1
                 ep_return += reward
                 self.env.render()
+                # if self.env.calc_reward_reach(achieved_goal, goal) == 0:
+                #     print(achieved_goal)
+                #     self.env.step(np.array([0,0,0,0,0,0,1]))
+                #     self.env.step(np.array([0,0,0,0,0,0,1]))
+                #     tmp = goal.copy()
+                #     tmp[:3] = goal[3:]
+                #     goal = tmp
+                #     time.sleep(1)
             print(f"Episode {ep}: return {ep_return} done {done}")
         self.env.pg = old_pg
 
@@ -234,6 +242,50 @@ class DDPGHERAgent:
                 env.render()
         return obs, done
 
+    def generate_episode_with_beh_policy(self):
+        ep_obs = np.zeros(shape=(self.episode_len, self.obs_dim))
+        ep_actions = np.zeros(shape=(self.episode_len, self.action_dim))
+        ep_next_obs = np.zeros(shape=(self.episode_len, self.obs_dim))
+        ep_rewards = np.zeros(shape=(self.episode_len, 1))
+        ep_achieved_goals = np.zeros(shape=(self.episode_len, self.goal_dim))
+        ep_desired_goals = np.zeros(shape=(self.episode_len, self.goal_dim))
+        
+        actor_loss, critic_loss = 0, 0
+        reward = 0
+        grip = 0
+        reached = False
+        obs, original_goal = self.env.reset()
+        goal = original_goal.copy()
+        t = 0
+        while t < self.episode_len:
+            obs_norm = np.squeeze(self.obs_normalizer.normalize(obs))
+            goal_norm = np.squeeze(self.goal_normalizer.normalize(goal))
+            obs_goal_norm_torch = torch.FloatTensor(np.concatenate((obs_norm, goal_norm))).to(device)
+
+            if reached and grip < 2:
+                action_detached = np.array([0,0,0,0,0,0,1])
+                grip += 1
+            else:
+                action = self.behavioral_policy(obs_goal_norm_torch)
+                action_detached = (action.cpu().detach().numpy()+np.random.normal(scale=0.1, size=self.action_dim))\
+                    .clip(self.env.actions_low, self.env.actions_high)
+            next_obs, achieved_goal = self.env.step(action_detached)
+            reward = self.reward_fn(achieved_goal, goal)
+            if not reached and self.env.calc_reward_reach(achieved_goal, goal):
+                reached = True
+                tmp = goal.copy()
+                tmp[:3] = goal[3:]
+                goal = tmp
+
+            ep_obs[t] = obs
+            ep_actions[t] = action_detached.copy()
+            ep_next_obs[t] = next_obs
+            ep_rewards[t] = reward
+            ep_achieved_goals[t] = achieved_goal
+            ep_desired_goals[t] = original_goal
+            obs = next_obs
+        self.replay_buffer.add_episode(ep_obs, ep_actions, ep_next_obs, ep_rewards, ep_achieved_goals, ep_desired_goals)
+
 
     def train(self, epochs=200, iterations_per_epoch=100, episodes_per_iter=1000, exploration_eps=0.1, future_goals = 4):
         if self.use_demonstrations:
@@ -250,7 +302,7 @@ class DDPGHERAgent:
             self._sync_network_parameters(self.critic)
             self._sync_network_parameters(self.critic_target)
 
-        beh_policy_prob = 0.8
+        beh_policy_prob = 0.5
         exploration_eps_decay = 0.98
         for epoch in range(epochs):
             if MPI.COMM_WORLD.Get_rank() == 0:
@@ -269,6 +321,11 @@ class DDPGHERAgent:
                     if self.reward_fn(self.env.get_achieved_goal_from_obs(obs), goal) == 0:
                         continue # we discard episodes in which the goal has been satisfied
                     started_episodes += 1
+
+                    if np.random.rand() < beh_policy_prob:
+                        self.generate_episode_with_beh_policy()
+                        continue
+                        
                     ep_obs = np.zeros(shape=(self.episode_len, self.obs_dim))
                     ep_actions = np.zeros(shape=(self.episode_len, self.action_dim))
                     ep_next_obs = np.zeros(shape=(self.episode_len, self.obs_dim))
@@ -318,6 +375,9 @@ class DDPGHERAgent:
             success_rate_eval = self._evaluate(10 if self.proc_count <= 4 else 5)
             if epoch > 0 and epoch % 5 == 0:
                 exploration_eps = exploration_eps * exploration_eps_decay
+
+            if epoch > 30:
+                beh_policy_prob = 0
             if MPI.COMM_WORLD.Get_rank() == 0:
                 self._save(epoch)
                 self.logger.print_and_log_output(f"Epoch: {epoch} Success rate (eval) {success_rate_eval} Duration: {end_epoch-start_epoch}s")
