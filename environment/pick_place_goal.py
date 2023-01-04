@@ -96,8 +96,8 @@ class PickPlaceGoalPick(gym.Env):
     def generate_goal_pick(self):
         rs_env = self.env_wrapper.gym_env.env
         obj_pos = rs_env.sim.data.body_xpos[rs_env.obj_body_id['Can']]
-        x = obj_pos[0] + np.random.uniform(low=0.02, high=0.2)
-        y = obj_pos[1] + np.random.uniform(low=0.02, high=0.2)
+        x = obj_pos[0] + np.random.uniform(low=0.02, high=0.1)
+        y = obj_pos[1] + np.random.uniform(low=0.02, high=0.1)
         # sometimes the goal should be on the table
         prob = np.random.rand()
         if (prob < self.p or not self.move_object):
