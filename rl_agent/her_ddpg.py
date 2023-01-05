@@ -195,8 +195,9 @@ class DDPGHERAgent:
             t = 0
             done = False
             ep_return = 0
-            # obs, first_policy_done = self._run_policy_till_completion(env, obs, env.extract_can_pos_from_obs(obs), True)
-            # print(first_policy_done)
+            if self.behavioral_policy is not None:
+                obs, first_policy_done = self._run_policy_till_completion(obs, goal, True)
+                print(first_policy_done)
             while not done and t < steps:
                 obs_norm = np.squeeze(self.obs_normalizer.normalize(obs))
                 goal_norm = np.squeeze(self.goal_normalizer.normalize(goal))
@@ -210,6 +211,7 @@ class DDPGHERAgent:
                 obs = next_obs
                 t += 1
                 ep_return += reward
+                print(achieved_goal)
                 self.env.render()
                 # if self.env.calc_reward_reach(achieved_goal, goal) == 0:
                 #     print(achieved_goal)
@@ -222,7 +224,7 @@ class DDPGHERAgent:
             print(f"Episode {ep}: return {ep_return} done {done}")
         self.env.pg = old_pg
 
-    def _run_policy_till_completion(self, env, obs, goal, render=False):
+    def _run_policy_till_completion(self, obs, goal, render=False):
         done = False
         t = 0
         while not done and t < self.beh_T:
@@ -232,14 +234,12 @@ class DDPGHERAgent:
             action = self.behavioral_policy(obs_goal_norm_torch)
             action_detached = action.cpu().detach().numpy()\
                 .clip(self.env.actions_low, self.env.actions_high)
-            next_obs, _ = env.step(action_detached)
-            achieved_goal = self.env.extract_eef_pos_from_obs(obs)
-            reward = self.reward_fn(achieved_goal, goal)
-            done = (reward == 0)
+            next_obs, achieved_goal = self.env.step(action_detached)
+            done = self.env.calc_reward_reach(achieved_goal, goal) == 0
             obs = next_obs
             t += 1
             if render:
-                env.render()
+                self.env.render()
         return obs, done
 
     def generate_episode_with_beh_policy(self):
@@ -317,15 +317,11 @@ class DDPGHERAgent:
                 started_episodes = 0
                 for ep in range(episodes_per_iter//self.proc_count):
                     obs, goal = self.env.reset()
-                    # obs, first_policy_done = self._run_policy_till_completion(self.env, obs, self.env.extract_can_pos_from_obs(obs))
-                    # if not first_policy_done or self.reward_fn(self.env.get_achieved_goal_from_obs(obs), goal) == 0:
+                    obs, first_policy_done = self._run_policy_till_completion(obs, goal)
                     if self.reward_fn(self.env.get_achieved_goal_from_obs(obs), goal) == 0:
+                    # if self.reward_fn(self.env.get_achieved_goal_from_obs(obs), goal) == 0:
                         continue # we discard episodes in which the goal has been satisfied
                     started_episodes += 1
-
-                    if self.behavioral_policy is not None and np.random.rand() < beh_policy_prob:
-                        self.generate_episode_with_beh_policy()
-                        continue
                         
                     ep_obs = np.zeros(shape=(self.episode_len, self.obs_dim))
                     ep_actions = np.zeros(shape=(self.episode_len, self.action_dim))
@@ -370,7 +366,7 @@ class DDPGHERAgent:
                         self.obs_normalizer.sync_stats()
                         self.goal_normalizer.sync_stats()
                 actor_loss, critic_loss, value = self.update()
-                self.logger.add(reward, actor_loss, critic_loss, iteration_success_count, value)
+                self.logger.add(0, actor_loss, critic_loss, iteration_success_count, value)
             beh_policy_prob = np.max([0.1, 0.95*beh_policy_prob])
             end_epoch = time.time()
             success_rate_eval = self._evaluate(10 if self.proc_count <= 4 else 5)
@@ -440,6 +436,8 @@ class DDPGHERAgent:
             obs, goal = self.env.reset()
             while self.reward_fn(self.env.get_achieved_goal_from_obs(obs), goal) == 0:
                 obs, goal = self.env.reset() # sample goal until it is not initially satisfied
+            if self.behavioral_policy is not None:
+                obs, _ = self._run_policy_till_completion(obs, goal, False)
             t = 0
             done = False
             ep_return = 0
