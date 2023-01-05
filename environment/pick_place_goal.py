@@ -126,7 +126,7 @@ class PickPlaceGoalPick(gym.Env):
     def calc_reward_reach(achieved_goal, desired_goal):
         achieved_goal = achieved_goal[:3]
         desired_goal = desired_goal[:3]
-        goal_reached = np.linalg.norm(achieved_goal - desired_goal, axis=-1) < 0.005
+        goal_reached = np.linalg.norm(achieved_goal - desired_goal, axis=-1) < 0.01
         return 0.0 if goal_reached else -1.0
 
     def render(self):

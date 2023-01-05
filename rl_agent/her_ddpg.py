@@ -189,6 +189,7 @@ class DDPGHERAgent:
         # env = PickPlaceGoalPick(env_config=self.env_cfg, p=0, pg=0, move_object=True)
         old_pg = self.env.pg
         self.env.pg = 0
+        self.env.p = 0
         for ep in range(episodes):
             obs, goal = self.env.reset()
             print(f"Goal: {goal}")
@@ -236,6 +237,9 @@ class DDPGHERAgent:
                 .clip(self.env.actions_low, self.env.actions_high)
             next_obs, achieved_goal = self.env.step(action_detached)
             done = self.env.calc_reward_reach(achieved_goal, goal) == 0
+            print(achieved_goal)
+            if not done:
+                goal[:3] = self.env.extract_can_pos_from_obs(next_obs)
             obs = next_obs
             t += 1
             if render:
@@ -317,9 +321,9 @@ class DDPGHERAgent:
                 started_episodes = 0
                 for ep in range(episodes_per_iter//self.proc_count):
                     obs, goal = self.env.reset()
-                    obs, first_policy_done = self._run_policy_till_completion(obs, goal)
+                    if self.behavioral_policy is not None:
+                        obs, first_policy_done = self._run_policy_till_completion(obs, goal)
                     if self.reward_fn(self.env.get_achieved_goal_from_obs(obs), goal) == 0:
-                    # if self.reward_fn(self.env.get_achieved_goal_from_obs(obs), goal) == 0:
                         continue # we discard episodes in which the goal has been satisfied
                     started_episodes += 1
                         
@@ -359,6 +363,8 @@ class DDPGHERAgent:
                         ep_achieved_goals[t] = achieved_goal
                         ep_desired_goals[t] = goal
                         obs = next_obs
+                        if reward != 0:
+                            goal[:3] = self.env.extract_can_pos_from_obs(next_obs)
                     self.replay_buffer.add_episode(ep_obs, ep_actions, ep_next_obs, ep_rewards, ep_achieved_goals, ep_desired_goals)
                 exp_gather_end = time.time()
                 if started_episodes > 0: # if the goal is satisfied at the beginning, we do not start the episode
@@ -428,7 +434,7 @@ class DDPGHERAgent:
                 target_actor_params.data.copy_(self.polyak * target_actor_params.data + (1.0 - self.polyak) * actor_params.data)
         return actor_losses.mean().detach(), critic_losses.mean().detach(), values.mean().detach()
 
-    def _evaluate(self, episodes=10):
+    def _evaluate(self, episodes=10, render=False):
         old_pg = self.env.pg
         self.env.pg = 0
         successful_episodes = 0
@@ -437,7 +443,7 @@ class DDPGHERAgent:
             while self.reward_fn(self.env.get_achieved_goal_from_obs(obs), goal) == 0:
                 obs, goal = self.env.reset() # sample goal until it is not initially satisfied
             if self.behavioral_policy is not None:
-                obs, _ = self._run_policy_till_completion(obs, goal, False)
+                obs, _ = self._run_policy_till_completion(obs, goal, render)
             t = 0
             done = False
             ep_return = 0
@@ -454,6 +460,8 @@ class DDPGHERAgent:
                 obs = next_obs
                 t += 1
                 ep_return += reward
+                if render:
+                    self.env.render()
             if done:
                 successful_episodes += 1
         local_success_rate = successful_episodes / episodes
@@ -593,6 +601,7 @@ def main():
     elif args.action == 'rollout':
         env_cfg['has_renderer'] = True
         env = PickPlaceGoalPick(env_config=env_cfg, p=0, move_object=args.move_object)
+        # set_random_seeds(args.seed, env)
         agent = DDPGHERAgent(env=env, env_cfg=env_cfg, obs_dim=env.obs_dim, 
             episode_len=150,
             action_dim=env.action_dim, 
