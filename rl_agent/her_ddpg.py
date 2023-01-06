@@ -199,6 +199,7 @@ class DDPGHERAgent:
             if self.behavioral_policy is not None:
                 obs, first_policy_done = self._run_policy_till_completion(obs, goal, True)
                 print(first_policy_done)
+            original_can_pos = self.env.extract_can_pos_from_obs(obs)
             while not done and t < steps:
                 obs_norm = np.squeeze(self.obs_normalizer.normalize(obs))
                 goal_norm = np.squeeze(self.goal_normalizer.normalize(goal))
@@ -209,6 +210,9 @@ class DDPGHERAgent:
                 next_obs, achieved_goal = self.env.step(action_dateched)
                 reward = self.reward_fn(achieved_goal, goal)
                 done = (reward == 0)
+                if np.linalg.norm(original_can_pos - self.env.extract_can_pos_from_obs(next_obs)) > 0.002 and not done:
+                    goal[:3] = self.env.extract_can_pos_from_obs(next_obs) + np.random.uniform(0.001, 0.003)
+                    original_can_pos = goal[:3]
                 obs = next_obs
                 t += 1
                 ep_return += reward
@@ -336,6 +340,7 @@ class DDPGHERAgent:
                     
                     actor_loss, critic_loss = 0, 0
                     reward = 0
+                    original_can_pos = self.env.extract_can_pos_from_obs(obs)
                     for t in range(self.episode_len):
                         obs_norm = np.squeeze(self.obs_normalizer.normalize(obs))
                         goal_norm = np.squeeze(self.goal_normalizer.normalize(goal))
@@ -363,8 +368,9 @@ class DDPGHERAgent:
                         ep_achieved_goals[t] = achieved_goal
                         ep_desired_goals[t] = goal
                         obs = next_obs
-                        if reward != 0:
+                        if np.linalg.norm(original_can_pos - self.env.extract_can_pos_from_obs(next_obs)) > 0.002 and reward != 0:
                             goal[:3] = self.env.extract_can_pos_from_obs(next_obs) + np.random.uniform(0.001, 0.003)
+                            original_can_pos = goal[:3]
                     self.replay_buffer.add_episode(ep_obs, ep_actions, ep_next_obs, ep_rewards, ep_achieved_goals, ep_desired_goals)
                 exp_gather_end = time.time()
                 if started_episodes > 0: # if the goal is satisfied at the beginning, we do not start the episode
@@ -447,6 +453,7 @@ class DDPGHERAgent:
             t = 0
             done = False
             ep_return = 0
+            original_can_pos = self.env.extract_can_pos_from_obs(obs)
             while not done and t < self.episode_len:
                 obs_norm = np.squeeze(self.obs_normalizer.normalize(obs))
                 goal_norm = np.squeeze(self.goal_normalizer.normalize(goal))
@@ -457,7 +464,7 @@ class DDPGHERAgent:
                 next_obs, achieved_goal = self.env.step(action_dateched)
                 reward = self.reward_fn(achieved_goal, goal)
                 done = (reward == 0)
-                if not done:
+                if np.linalg.norm(original_can_pos - self.env.extract_can_pos_from_obs(next_obs)) > 0.002 and not done:
                     goal = self.env.extract_can_pos_from_obs(next_obs) + np.random.uniform(low=0.001, high=0.003)
                 obs = next_obs
                 t += 1
