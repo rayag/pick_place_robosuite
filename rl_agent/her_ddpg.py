@@ -364,7 +364,7 @@ class DDPGHERAgent:
                         ep_desired_goals[t] = goal
                         obs = next_obs
                         if reward != 0:
-                            goal[:3] = self.env.extract_can_pos_from_obs(next_obs)
+                            goal[:3] = self.env.extract_can_pos_from_obs(next_obs) + np.random.uniform(0.001, 0.003)
                     self.replay_buffer.add_episode(ep_obs, ep_actions, ep_next_obs, ep_rewards, ep_achieved_goals, ep_desired_goals)
                 exp_gather_end = time.time()
                 if started_episodes > 0: # if the goal is satisfied at the beginning, we do not start the episode
@@ -457,6 +457,8 @@ class DDPGHERAgent:
                 next_obs, achieved_goal = self.env.step(action_dateched)
                 reward = self.reward_fn(achieved_goal, goal)
                 done = (reward == 0)
+                if not done:
+                    goal = self.env.extract_can_pos_from_obs(next_obs) + np.random.uniform(low=0.001, high=0.003)
                 obs = next_obs
                 t += 1
                 ep_return += reward
