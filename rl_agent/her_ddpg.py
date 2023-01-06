@@ -110,7 +110,8 @@ class DDPGHERAgent:
     def __init__(self, env: PickPlaceGoalPick, env_cfg: any,  obs_dim: int, action_dim: int, goal_dim: int, 
         episode_len: int=200, update_iterations: int=4, batch_size: int=256, actor_lr :float=1e-3, 
         critic_lr: float = 1e-3, input_clip_range: float=5, descr: str='', results_dir: str='./results', 
-        normalize_data: bool=True, checkpoint_dir: str=None, behavioral_policy_dir: str=None, use_demos=False) -> None:
+        normalize_data: bool=True, checkpoint_dir: str=None, behavioral_policy_dir: str=None, use_demos=False,
+        helper_policy_dir: str=None, helper_T: int=150) -> None:
         self.env = env
         self.env_cfg = env_cfg
         self.obs_dim = obs_dim
@@ -151,11 +152,19 @@ class DDPGHERAgent:
         if behavioral_policy_dir is not None:
             self.behavioral_policy = ActorNetworkLowDim(obs_dim=self.obs_dim + self.goal_dim, action_dim=self.action_dim, 
                 action_low=self.env.actions_low, action_high=self.env.actions_high)
-            self._load_behavioural_policy(behavioral_policy_dir)
+            self._load_policy(self.behavioral_policy, behavioral_policy_dir)
             # self._load_from(behavioral_policy_dir)
             self.beh_T = 150
         else:
             self.behavioral_policy = None
+
+        if helper_policy_dir is not None:
+            self.helper_policy = ActorNetworkLowDim(obs_dim=self.obs_dim + self.goal_dim, action_dim=self.action_dim, 
+                action_low=self.env.actions_low, action_high=self.env.actions_high)
+            self._load_policy(self.helper_policy, helper_policy_dir)
+            self.helper_T = helper_T
+        else:
+            self.helper_policy = None
 
         self.update_iterations = update_iterations
         self.batch_size = batch_size
@@ -196,8 +205,8 @@ class DDPGHERAgent:
             t = 0
             done = False
             ep_return = 0
-            if self.behavioral_policy is not None:
-                obs, first_policy_done = self._run_policy_till_completion(obs, goal, True)
+            if self.helper_policy is not None:
+                obs, first_policy_done = self._run_helper_policy_till_completion(obs, goal, True)
                 print(first_policy_done)
             original_can_pos = self.env.extract_can_pos_from_obs(obs)
             while not done and t < steps:
@@ -216,7 +225,6 @@ class DDPGHERAgent:
                 obs = next_obs
                 t += 1
                 ep_return += reward
-                print(achieved_goal)
                 self.env.render()
                 # if self.env.calc_reward_reach(achieved_goal, goal) == 0:
                 #     print(achieved_goal)
@@ -229,21 +237,20 @@ class DDPGHERAgent:
             print(f"Episode {ep}: return {ep_return} done {done}")
         self.env.pg = old_pg
 
-    def _run_policy_till_completion(self, obs, goal, render=False):
+    def _run_helper_policy_till_completion(self, obs, goal, render=False):
         done = False
         t = 0
-        while not done and t < self.beh_T:
+        while not done and t < self.helper_T:
             obs_norm = np.squeeze(self.obs_normalizer.normalize(obs))
             goal_norm = np.squeeze(self.goal_normalizer.normalize(goal))
             obs_goal_norm_torch = torch.FloatTensor(np.concatenate((obs_norm, goal_norm))).to(device)
-            action = self.behavioral_policy(obs_goal_norm_torch)
+            action = self.helper_policy(obs_goal_norm_torch)
             action_detached = action.cpu().detach().numpy()\
                 .clip(self.env.actions_low, self.env.actions_high)
             next_obs, achieved_goal = self.env.step(action_detached)
             done = self.env.calc_reward_reach(achieved_goal, goal) == 0
-            print(achieved_goal)
             if not done:
-                goal[:3] = self.env.extract_can_pos_from_obs(next_obs)
+                goal[:3] = self.env.extract_can_pos_from_obs(next_obs)+ np.random.uniform(0.001, 0.003)
             obs = next_obs
             t += 1
             if render:
@@ -325,8 +332,8 @@ class DDPGHERAgent:
                 started_episodes = 0
                 for ep in range(episodes_per_iter//self.proc_count):
                     obs, goal = self.env.reset()
-                    if self.behavioral_policy is not None:
-                        obs, first_policy_done = self._run_policy_till_completion(obs, goal)
+                    if self.helper_policy is not None:
+                        obs, _ = self._run_helper_policy_till_completion(obs, goal)
                     if self.reward_fn(self.env.get_achieved_goal_from_obs(obs), goal) == 0:
                         continue # we discard episodes in which the goal has been satisfied
                     started_episodes += 1
@@ -448,8 +455,8 @@ class DDPGHERAgent:
             obs, goal = self.env.reset()
             while self.reward_fn(self.env.get_achieved_goal_from_obs(obs), goal) == 0:
                 obs, goal = self.env.reset() # sample goal until it is not initially satisfied
-            if self.behavioral_policy is not None:
-                obs, _ = self._run_policy_till_completion(obs, goal, render)
+            if self.helper_policy is not None:
+                obs, _ = self._run_helper_policy_till_completion(obs, goal, render)
             t = 0
             done = False
             ep_return = 0
@@ -512,10 +519,10 @@ class DDPGHERAgent:
             else:
                 print("Using default mean and std for normalizer")
     
-    def _load_behavioural_policy(self, path):
+    def _load_policy(self, policy, path):
         if os.path.exists(path):
-            print(f"Loading behavioural policy from {path}")
-            self.behavioral_policy.load_state_dict(torch.load(os.path.join(path, 'actor_weights.pth'), map_location=device))
+            print(f"Loading policy from {path}")
+            policy.load_state_dict(torch.load(os.path.join(path, 'actor_weights.pth'), map_location=device))
             if os.path.exists(os.path.join(path, 'normalizer_data.h5')):
                 with h5py.File(os.path.join(path, 'normalizer_data.h5'), 'r') as f:
                     self.obs_normalizer.set_mean_std(f['obs_norm_mean'][()], f['obs_norm_std'][()])
@@ -523,7 +530,7 @@ class DDPGHERAgent:
             else:
                 print("Using default mean and std for normalizer")
         else:
-            print(f"Could not find behavioural policy weights in {path}")
+            print(f"Could not find policy weights in {path}")
     
     @staticmethod
     def _sync_network_parameters(net):
@@ -577,6 +584,7 @@ def main():
     parser.add_argument('--move_object', default=False, action='store_true')
     parser.add_argument('-a', '--action', choices=['train', 'rollout'], default='train')
     parser.add_argument('--beh_pi', type=str, help="Path to behavioral policy weights", default=None)
+    parser.add_argument('--helper_pi', type=str, help="Path to helper policy")
     args = parser.parse_args()
     print(f"Actor alpha {args.actor_lr}, Critic alpha {args.critic_lr} Normalize {args.normalize} Move object {args.move_object}")
 
@@ -600,6 +608,7 @@ def main():
             update_iterations=int(args.update_it),
             checkpoint_dir=args.checkpoint,
             behavioral_policy_dir=args.beh_pi,
+            helper_policy_dir=args.helper_pi,
             use_demos=False,
             descr='HER')
         agent.train(epochs=int(args.epochs), 
@@ -622,6 +631,7 @@ def main():
             update_iterations=int(args.update_it),
             checkpoint_dir=args.checkpoint,
             behavioral_policy_dir=args.beh_pi,
+            helper_policy_dir=args.helper_pi,
             descr='ROLLOUT')
         agent.rollout(episodes=10, steps=150)
 

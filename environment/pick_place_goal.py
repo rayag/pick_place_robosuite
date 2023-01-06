@@ -62,7 +62,7 @@ class PickPlaceGoalPick(gym.Env):
             obs, _ = self.step([0,0,0,0,0,0,0.7])
         else:
             obs = self.env_wrapper.reset()
-        self.goal = self.generate_goal_pick()
+        self.goal = self.generate_goal()
         return obs, self.goal
 
     def reset_to(self, state):
@@ -70,7 +70,7 @@ class PickPlaceGoalPick(gym.Env):
         return observation, desired goal
         '''
         obs = self.env_wrapper.reset_to(state)
-        self.goal = self.generate_goal_pick()
+        self.goal = self.generate_goal()
         return obs, self.goal
     
     def generate_goal_can(self):
@@ -92,6 +92,12 @@ class PickPlaceGoalPick(gym.Env):
         y = np.random.uniform(low=obj_pos[1], high=obj_pos[1] + 0.005)
         z = np.random.uniform(low=obj_pos[2], high=obj_pos[2] + 0.002)
         return np.array([x,y,z])
+
+    def generate_goal(self):
+        if self.move_object:
+            return self.generate_goal_pick()
+        else:
+            return self.generate_goal_reach()
     
     def generate_goal_pick(self):
         rs_env = self.env_wrapper.gym_env.env
@@ -104,7 +110,12 @@ class PickPlaceGoalPick(gym.Env):
             z = obj_pos[2]
         else:
             z = obj_pos[2] + np.random.uniform(low=0.1, high=0.2)
-        return np.array([obj_pos[0], obj_pos[1], obj_pos[2] + np.random.uniform(low=0, high=0.003), x,y,z])
+        return np.array([obj_pos[0], obj_pos[1], obj_pos[2] + np.random.uniform(low=0.001, high=0.005), x,y,z])
+    
+    def generate_goal_reach(self):
+        rs_env = self.env_wrapper.gym_env.env
+        obj_pos = rs_env.sim.data.body_xpos[rs_env.obj_body_id['Can']]
+        return np.array([obj_pos[0], obj_pos[1], obj_pos[2] + np.random.uniform(low=0.001, high=0.005), obj_pos[0], obj_pos[1], obj_pos[2]])
 
     def calc_reward_can(self, state_goal):
         goal = state_goal[:self.goal_dim]
@@ -124,10 +135,10 @@ class PickPlaceGoalPick(gym.Env):
 
     @staticmethod
     def calc_reward_reach(achieved_goal, desired_goal):
-        achieved_goal = achieved_goal[:3]
-        desired_goal = desired_goal[:3]
-        goal_reached = np.linalg.norm(achieved_goal - desired_goal, axis=-1) < 0.01
-        return 0.0 if goal_reached else -1.0
+        achieved_gripper_pos = achieved_goal[:3]
+        desired_gripper_pos = desired_goal[:3]
+        goal_reached = np.linalg.norm(achieved_gripper_pos - desired_gripper_pos, axis=-1) < 0.005
+        return 0 if goal_reached else -1
 
     def render(self):
         self.env_wrapper.render()
