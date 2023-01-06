@@ -94,10 +94,7 @@ class PickPlaceGoalPick(gym.Env):
         return np.array([x,y,z])
 
     def generate_goal(self):
-        if self.move_object:
-            return self.generate_goal_pick()
-        else:
-            return self.generate_goal_reach()
+        return self.generate_goal_pick()
     
     def generate_goal_pick(self):
         rs_env = self.env_wrapper.gym_env.env
@@ -112,10 +109,6 @@ class PickPlaceGoalPick(gym.Env):
             z = obj_pos[2] + np.random.uniform(low=0.1, high=0.2)
         return np.array([obj_pos[0], obj_pos[1], obj_pos[2] + np.random.uniform(low=0.001, high=0.005), x,y,z])
     
-    def generate_goal_reach(self):
-        rs_env = self.env_wrapper.gym_env.env
-        obj_pos = rs_env.sim.data.body_xpos[rs_env.obj_body_id['Can']]
-        return np.array([obj_pos[0], obj_pos[1], obj_pos[2] + np.random.uniform(low=0.001, high=0.005), obj_pos[0], obj_pos[1], obj_pos[2]])
 
     def calc_reward_can(self, state_goal):
         goal = state_goal[:self.goal_dim]

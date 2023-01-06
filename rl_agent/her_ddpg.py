@@ -219,8 +219,8 @@ class DDPGHERAgent:
                 next_obs, achieved_goal = self.env.step(action_dateched)
                 reward = self.reward_fn(achieved_goal, goal)
                 done = (reward == 0)
-                if np.linalg.norm(original_can_pos - self.env.extract_can_pos_from_obs(next_obs)) > 0.002 and not done:
-                    goal[:3] = self.env.extract_can_pos_from_obs(next_obs) + np.random.uniform(0.001, 0.003)
+                if np.linalg.norm(original_can_pos - self.env.extract_can_pos_from_obs(obs)) > 0.002 and not done:
+                    goal[:3] = self.env.extract_can_pos_from_obs(obs) + np.random.uniform(0.001, 0.003)
                     original_can_pos = goal[:3]
                 obs = next_obs
                 t += 1
@@ -325,15 +325,19 @@ class DDPGHERAgent:
                 self.logger.print_and_log_output(f"Starting epoch {epoch}, behavioral policy probability: {beh_policy_prob}")
             epoch_success_count = 0
             start_epoch = time.time()
+            helper_success = 0
             for it in range(iterations_per_epoch):
                 it_start = time.time()
                 iteration_success_count = 0
                 success = False
                 started_episodes = 0
+                
                 for ep in range(episodes_per_iter//self.proc_count):
                     obs, goal = self.env.reset()
                     if self.helper_policy is not None:
-                        obs, _ = self._run_helper_policy_till_completion(obs, goal)
+                        obs, helper_done = self._run_helper_policy_till_completion(obs, goal)
+                        if helper_done:
+                            helper_success += 1
                     if self.reward_fn(self.env.get_achieved_goal_from_obs(obs), goal) == 0:
                         continue # we discard episodes in which the goal has been satisfied
                     started_episodes += 1
@@ -381,7 +385,7 @@ class DDPGHERAgent:
                     self.replay_buffer.add_episode(ep_obs, ep_actions, ep_next_obs, ep_rewards, ep_achieved_goals, ep_desired_goals)
                 exp_gather_end = time.time()
                 if started_episodes > 0: # if the goal is satisfied at the beginning, we do not start the episode
-                    if self.normalize_data:
+                    if self.helper_policy is None and self.normalize_data:
                         self.obs_normalizer.sync_stats()
                         self.goal_normalizer.sync_stats()
                 actor_loss, critic_loss, value = self.update()
@@ -396,7 +400,7 @@ class DDPGHERAgent:
                 beh_policy_prob = 0
             if MPI.COMM_WORLD.Get_rank() == 0:
                 self._save(epoch)
-                self.logger.print_and_log_output(f"Epoch: {epoch} Success rate (eval) {success_rate_eval} Duration: {end_epoch-start_epoch}s")
+                self.logger.print_and_log_output(f"Epoch: {epoch} Success rate (eval) {success_rate_eval} Duration: {end_epoch-start_epoch}s Helper success {helper_success}")
                 self.logger.add_epoch_data(success_rate_eval)
 
     def update(self, single_worker = False):
