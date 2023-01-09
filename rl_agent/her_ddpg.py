@@ -161,7 +161,9 @@ class DDPGHERAgent:
         if helper_policy_dir is not None:
             self.helper_policy = ActorNetworkLowDim(obs_dim=self.obs_dim + self.goal_dim, action_dim=self.action_dim, 
                 action_low=self.env.actions_low, action_high=self.env.actions_high)
-            self._load_policy(self.helper_policy, helper_policy_dir)
+            self.helper_obs_norm = Normalizer(self.obs_dim, clip_range=input_clip_range)
+            self.helper_goal_norm = Normalizer(self.goal_dim, clip_range=input_clip_range)
+            self._load_policy(self.helper_policy, helper_policy_dir, self.helper_obs_norm, self.helper_goal_norm)
             self.helper_T = helper_T
         else:
             self.helper_policy = None
@@ -245,8 +247,8 @@ class DDPGHERAgent:
         done = False
         t = 0
         while not done and t < self.helper_T:
-            obs_norm = np.squeeze(self.obs_normalizer.normalize(obs))
-            goal_norm = np.squeeze(self.goal_normalizer.normalize(goal))
+            obs_norm = np.squeeze(self.helper_obs_norm.normalize(obs))
+            goal_norm = np.squeeze(self.helper_goal_norm.normalize(goal))
             obs_goal_norm_torch = torch.FloatTensor(np.concatenate((obs_norm, goal_norm))).to(device)
             action = self.helper_policy(obs_goal_norm_torch)
             action_detached = action.cpu().detach().numpy()\
@@ -386,9 +388,9 @@ class DDPGHERAgent:
                         ep_achieved_goals[t] = achieved_goal
                         ep_desired_goals[t] = goal
                         obs = next_obs
-                        if np.linalg.norm(original_can_pos - self.env.extract_can_pos_from_obs(next_obs)) > 0.002 and reward != 0:
-                            goal[:3] = self.env.extract_can_pos_from_obs(next_obs) + np.random.uniform(0.001, 0.003)
-                            original_can_pos = goal[:3]
+                        # if np.linalg.norm(original_can_pos - self.env.extract_can_pos_from_obs(next_obs)) > 0.002 and reward != 0:
+                        #     goal[:3] = self.env.extract_can_pos_from_obs(next_obs) + np.random.uniform(0.001, 0.003)
+                        #     original_can_pos = goal[:3]
                     self.replay_buffer.add_episode(ep_obs, ep_actions, ep_next_obs, ep_rewards, ep_achieved_goals, ep_desired_goals)
                 exp_gather_end = time.time()
                 if started_episodes > 0: # if the goal is satisfied at the beginning, we do not start the episode
@@ -530,14 +532,20 @@ class DDPGHERAgent:
             else:
                 print("Using default mean and std for normalizer")
     
-    def _load_policy(self, policy, path):
+    def _load_policy(self, policy, path,obs_norm=None, goal_norm=None):
         if os.path.exists(path):
             print(f"Loading policy from {path}")
             policy.load_state_dict(torch.load(os.path.join(path, 'actor_weights.pth'), map_location=device))
             if os.path.exists(os.path.join(path, 'normalizer_data.h5')):
                 with h5py.File(os.path.join(path, 'normalizer_data.h5'), 'r') as f:
-                    self.obs_normalizer.set_mean_std(f['obs_norm_mean'][()], f['obs_norm_std'][()])
-                    self.goal_normalizer.set_mean_std(f['goal_norm_mean'][()], f['goal_norm_std'][()])
+                    if obs_norm is not None:
+                        obs_norm.set_mean_std(f['obs_norm_mean'][()], f['obs_norm_std'][()])
+                    else:
+                        self.obs_normalizer.set_mean_std(f['obs_norm_mean'][()], f['obs_norm_std'][()])
+                    if goal_norm is not None:
+                        goal_norm.set_mean_std(f['goal_norm_mean'][()], f['goal_norm_std'][()])
+                    else:
+                        self.goal_normalizer.set_mean_std(f['goal_norm_mean'][()], f['goal_norm_std'][()])
             else:
                 print("Using default mean and std for normalizer")
         else:

@@ -110,7 +110,7 @@ class PickPlaceGoalPick(gym.Env):
             z = obj_pos[2]
         else:
             z = obj_pos[2] + np.random.uniform(low=0.1, high=0.2)
-        return np.array([obj_pos[0], obj_pos[1], obj_pos[2] + np.random.uniform(low=0.001, high=0.005), x,y,z])
+        return np.array([x,y,z, x,y,z])
 
     def generate_goal_reach(self):
         # Goal is EEF end pos (x,y,z) and distance from EEF to Can
@@ -132,7 +132,7 @@ class PickPlaceGoalPick(gym.Env):
     def calc_reward_pick(achieved_goal, desired_goal):
         achieved_goal = achieved_goal[3:]
         desired_goal = desired_goal[3:]
-        goal_reached = np.linalg.norm(achieved_goal - desired_goal, axis=-1) < 0.015
+        goal_reached = np.linalg.norm(achieved_goal - desired_goal, axis=-1) < 0.01
         return 0.0 if goal_reached else -1.0
 
     @staticmethod
