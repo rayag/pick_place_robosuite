@@ -69,7 +69,7 @@ def visualise_her_results(path):
     except:
         print("Missing actor loss")
     try:
-        axis[1,0].plot(df['critic_loss'][100:])
+        axis[1,0].plot(df['critic_loss'])
         axis[1,0].legend(loc="upper left")
         axis[1,0].set_xlabel("Iteration")
         axis[1,0].set_ylabel("Critic Loss")

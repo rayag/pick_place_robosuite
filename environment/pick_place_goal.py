@@ -94,7 +94,10 @@ class PickPlaceGoalPick(gym.Env):
         return np.array([x,y,z])
 
     def generate_goal(self):
-        return self.generate_goal_pick()
+        if self.move_object:
+            return self.generate_goal_pick()
+        else:
+            return self.generate_goal_reach()
     
     def generate_goal_pick(self):
         rs_env = self.env_wrapper.gym_env.env
@@ -108,7 +111,13 @@ class PickPlaceGoalPick(gym.Env):
         else:
             z = obj_pos[2] + np.random.uniform(low=0.1, high=0.2)
         return np.array([obj_pos[0], obj_pos[1], obj_pos[2] + np.random.uniform(low=0.001, high=0.005), x,y,z])
-    
+
+    def generate_goal_reach(self):
+        # Goal is EEF end pos (x,y,z) and distance from EEF to Can
+        rs_env = self.env_wrapper.gym_env.env
+        obj_pos = rs_env.sim.data.body_xpos[rs_env.obj_body_id['Can']]
+        return np.array([obj_pos[0], obj_pos[1], obj_pos[2] + np.random.uniform(low=0.001, high=0.005), 0, 0, 0])
+        
 
     def calc_reward_can(self, state_goal):
         goal = state_goal[:self.goal_dim]
@@ -128,9 +137,9 @@ class PickPlaceGoalPick(gym.Env):
 
     @staticmethod
     def calc_reward_reach(achieved_goal, desired_goal):
-        achieved_gripper_pos = achieved_goal[:3]
-        desired_gripper_pos = desired_goal[:3]
-        goal_reached = np.linalg.norm(achieved_gripper_pos - desired_gripper_pos, axis=-1) < 0.005
+        # achieved_gripper_pos = achieved_goal[:3]
+        # desired_gripper_pos = desired_goal[:3]
+        goal_reached = np.linalg.norm(achieved_goal[3:] - desired_goal[3:], axis=-1) < 0.01
         return 0 if goal_reached else -1
 
     def render(self):
@@ -142,8 +151,14 @@ class PickPlaceGoalPick(gym.Env):
     def extract_can_pos_from_obs(self, obs):
         return obs[:3]
 
+    def extract_can_to_eef_dist_from_obs(self, obs):
+        return obs[7:10]
+
     def get_achieved_goal_from_obs(self, obs):
-        return np.concatenate((self.extract_eef_pos_from_obs(obs), self.extract_can_pos_from_obs(obs)))
+        if self.move_object:
+            return np.concatenate((self.extract_eef_pos_from_obs(obs), self.extract_can_pos_from_obs(obs)))
+        else:
+            return np.concatenate((self.extract_eef_pos_from_obs(obs), self.extract_can_to_eef_dist_from_obs(obs)))
 
     def get_reward_fn(self):
         if self.move_object:
@@ -194,7 +209,7 @@ def inspect_observations(visualize = False):
     env_cfg['pick_only'] = True
     if visualize:
         env_cfg['has_renderer'] = visualize
-    env = PickPlaceGoalPick(p=0, move_object=False)
+    env = PickPlaceGoalPick(env_config=env_cfg, p=0, move_object=False)
     with h5py.File(DEMO_PATH, "r+") as f:
         demos = list(f['data'].keys())
         print(f"Total episodes {len(demos)}")
@@ -223,7 +238,7 @@ def inspect_observations(visualize = False):
                     action = acts[t]
                     action[4:6] = 0
                 obs, achieved_goal = env.step(action)
-                reward = env.calc_reward_pick(achieved_goal, goal)
+                reward = env.get_reward_fn()(achieved_goal, goal)
                 done = reward == 0.0
                 if done:
                     break

@@ -208,6 +208,9 @@ class DDPGHERAgent:
             if self.helper_policy is not None:
                 obs, first_policy_done = self._run_helper_policy_till_completion(obs, goal, True)
                 print(first_policy_done)
+                print(obs[7:10])
+                print(np.linalg.norm(obs[7:10]-np.array([0,0,0])))
+                time.sleep(1)
             original_can_pos = self.env.extract_can_pos_from_obs(obs)
             while not done and t < steps:
                 obs_norm = np.squeeze(self.obs_normalizer.normalize(obs))
@@ -222,6 +225,7 @@ class DDPGHERAgent:
                 if np.linalg.norm(original_can_pos - self.env.extract_can_pos_from_obs(obs)) > 0.002 and not done:
                     goal[:3] = self.env.extract_can_pos_from_obs(obs) + np.random.uniform(0.001, 0.003)
                     original_can_pos = goal[:3]
+                    print(f"New goal {goal}")
                 obs = next_obs
                 t += 1
                 ep_return += reward
@@ -338,6 +342,9 @@ class DDPGHERAgent:
                         obs, helper_done = self._run_helper_policy_till_completion(obs, goal)
                         if helper_done:
                             helper_success += 1
+                        else:
+                            continue
+
                     if self.reward_fn(self.env.get_achieved_goal_from_obs(obs), goal) == 0:
                         continue # we discard episodes in which the goal has been satisfied
                     started_episodes += 1
