@@ -224,10 +224,10 @@ class DDPGHERAgent:
                 next_obs, achieved_goal = self.env.step(action_dateched)
                 reward = self.reward_fn(achieved_goal, goal)
                 done = (reward == 0)
-                if np.linalg.norm(original_can_pos - self.env.extract_can_pos_from_obs(obs)) > 0.002 and not done:
-                    goal[:3] = self.env.extract_can_pos_from_obs(obs) + np.random.uniform(0.001, 0.003)
-                    original_can_pos = goal[:3]
-                    print(f"New goal {goal}")
+                # if np.linalg.norm(original_can_pos - self.env.extract_can_pos_from_obs(obs)) > 0.002 and not done:
+                #     goal[:3] = self.env.extract_can_pos_from_obs(obs) + np.random.uniform(0.001, 0.003)
+                #     original_can_pos = goal[:3]
+                #     print(f"New goal {goal}")
                 obs = next_obs
                 t += 1
                 ep_return += reward
@@ -245,6 +245,9 @@ class DDPGHERAgent:
 
     def _run_helper_policy_till_completion(self, obs, goal, render=False):
         done = False
+        goal = self.env.generate_goal_reach()
+        move_object = self.env.move_object
+        self.env.move_object = False
         t = 0
         while not done and t < self.helper_T:
             obs_norm = np.squeeze(self.helper_obs_norm.normalize(obs))
@@ -261,6 +264,7 @@ class DDPGHERAgent:
             t += 1
             if render:
                 self.env.render()
+        self.env.move_object = move_object
         return obs, done
 
     def generate_episode_with_beh_policy(self):
@@ -484,8 +488,8 @@ class DDPGHERAgent:
                 next_obs, achieved_goal = self.env.step(action_dateched)
                 reward = self.reward_fn(achieved_goal, goal)
                 done = (reward == 0)
-                if np.linalg.norm(original_can_pos - self.env.extract_can_pos_from_obs(next_obs)) > 0.002 and not done:
-                    goal[:3] = self.env.extract_can_pos_from_obs(next_obs) + np.random.uniform(low=0.001, high=0.003)
+                # if np.linalg.norm(original_can_pos - self.env.extract_can_pos_from_obs(next_obs)) > 0.002 and not done:
+                #     goal[:3] = self.env.extract_can_pos_from_obs(next_obs) + np.random.uniform(low=0.001, high=0.003)
                 obs = next_obs
                 t += 1
                 ep_return += reward
