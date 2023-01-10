@@ -604,7 +604,7 @@ def main():
     parser.add_argument('--normalize', action='store_true', default=False)
     parser.add_argument('--update_it', default=40)
     parser.add_argument('--k', default=4)
-    parser.add_argument('-h', '--horizon', type=int, default=150)
+    parser.add_argument('--horizon', type=int, default=150)
     parser.add_argument('--seed', default=59, help="Random seed")
     parser.add_argument('--move_object', default=False, action='store_true')
     parser.add_argument('-a', '--action', choices=['train', 'rollout'], default='train')
