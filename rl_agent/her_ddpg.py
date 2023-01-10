@@ -468,6 +468,7 @@ class DDPGHERAgent:
         old_pg = self.env.pg
         self.env.pg = 0
         successful_episodes = 0
+        print(f"{MPI.COMM_WORLD.Get_rank()} Start eval")
         for ep in range(episodes):
             obs, goal = self.env.reset()
             while self.reward_fn(self.env.get_achieved_goal_from_obs(obs), goal) == 0:
@@ -603,13 +604,14 @@ def main():
     parser.add_argument('--normalize', action='store_true', default=False)
     parser.add_argument('--update_it', default=40)
     parser.add_argument('--k', default=4)
+    parser.add_argument('-h', '--horizon', type=int, default=150)
     parser.add_argument('--seed', default=59, help="Random seed")
     parser.add_argument('--move_object', default=False, action='store_true')
     parser.add_argument('-a', '--action', choices=['train', 'rollout'], default='train')
     parser.add_argument('--beh_pi', type=str, help="Path to behavioral policy weights", default=None)
     parser.add_argument('--helper_pi', type=str, help="Path to helper policy")
     args = parser.parse_args()
-    print(f"Actor alpha {args.actor_lr}, Critic alpha {args.critic_lr} Normalize {args.normalize} Move object {args.move_object}")
+    print(f"Actor alpha {args.actor_lr}, Critic alpha {args.critic_lr} Normalize {args.normalize} Move object {args.move_object} Helper policy {args.helper_pi}")
 
     env_cfg = PICK_PLACE_DEFAULT_ENV_CFG
     env_cfg['pick_only'] = True
@@ -621,7 +623,7 @@ def main():
         sync_envs(env)
         set_random_seeds(args.seed, env)
         agent = DDPGHERAgent(env=env, env_cfg=env_cfg, obs_dim=env.obs_dim, 
-            episode_len=150,
+            episode_len=args.horizon,
             action_dim=env.action_dim, 
             goal_dim=env.goal_dim, 
             actor_lr=float(args.actor_lr), 
@@ -644,7 +646,7 @@ def main():
         env = PickPlaceGoalPick(env_config=env_cfg, p=0, move_object=args.move_object)
         # set_random_seeds(args.seed, env)
         agent = DDPGHERAgent(env=env, env_cfg=env_cfg, obs_dim=env.obs_dim, 
-            episode_len=150,
+            episode_len=args.horizon,
             action_dim=env.action_dim, 
             goal_dim=env.goal_dim, 
             actor_lr=float(args.actor_lr), 
