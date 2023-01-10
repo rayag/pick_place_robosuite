@@ -346,10 +346,6 @@ class DDPGHERAgent:
                     obs, goal = self.env.reset()
                     if self.helper_policy is not None:
                         obs, helper_done = self._run_helper_policy_till_completion(obs, goal)
-                        if helper_done:
-                            helper_success += 1
-                        else:
-                            continue
 
                     if self.reward_fn(self.env.get_achieved_goal_from_obs(obs), goal) == 0:
                         continue # we discard episodes in which the goal has been satisfied
