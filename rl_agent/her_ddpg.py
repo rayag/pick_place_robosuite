@@ -197,7 +197,6 @@ class DDPGHERAgent:
             normalize_data=normalize_data)
 
     def rollout(self, episodes = 10, steps = 250):
-        # env = PickPlaceGoalPick(env_config=self.env_cfg, p=0, pg=0, move_object=True)
         old_pg = self.env.pg
         self.env.pg = 0
         self.env.p = 0
@@ -232,14 +231,6 @@ class DDPGHERAgent:
                 t += 1
                 ep_return += reward
                 self.env.render()
-                # if self.env.calc_reward_reach(achieved_goal, goal) == 0:
-                #     print(achieved_goal)
-                #     self.env.step(np.array([0,0,0,0,0,0,1]))
-                #     self.env.step(np.array([0,0,0,0,0,0,1]))
-                #     tmp = goal.copy()
-                #     tmp[:3] = goal[3:]
-                #     goal = tmp
-                #     time.sleep(1)
             print(f"Episode {ep}: return {ep_return} done {done}")
         self.env.pg = old_pg
 
@@ -617,7 +608,7 @@ def main():
     env_cfg['initialization_noise'] = None
     
     if args.action == 'train':
-        env = PickPlaceGoalPick(env_config=env_cfg, p=0, pg=0.5 if args.move_object else 0, move_object=args.move_object)
+        env = PickPlaceGoalPick(env_config=env_cfg, p=0, pg=0, move_object=args.move_object)
         sync_envs(env)
         set_random_seeds(args.seed, env)
         agent = DDPGHERAgent(env=env, env_cfg=env_cfg, obs_dim=env.obs_dim, 
@@ -656,7 +647,7 @@ def main():
             behavioral_policy_dir=args.beh_pi,
             helper_policy_dir=args.helper_pi,
             descr='ROLLOUT')
-        agent.rollout(episodes=10, steps=150)
+        agent.rollout(episodes=10, steps=args.horizon)
 
 if __name__ == '__main__':
     main()

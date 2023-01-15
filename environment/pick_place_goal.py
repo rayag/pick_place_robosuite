@@ -5,6 +5,7 @@ import gym
 import h5py
 import numpy as np
 import time
+import os
 from mpi4py import MPI
 
 GRABBED_PATH = "./data/can-grabbed/data.hdf5"
@@ -34,6 +35,10 @@ class PickPlaceGoalPick(gym.Env):
         self.states_grabbed_can = np.empty(shape=(160,71)) # TODO: remove magic
         self.p = p
         self.pg = pg
+        if self.move_object:
+            self.load_starting_states_for_pick()
+        else:
+            self.starting_states = None
 
     def load_states_with_object_grabbed(self):
         self.states_grabbed_can = get_states_grabbed_can()
@@ -61,8 +66,12 @@ class PickPlaceGoalPick(gym.Env):
             obs, _ = self.step([0,0,0,0,0,0,1])
             obs, _ = self.step([0,0,0,0,0,0,0.7])
         else:
-            obs = self.env_wrapper.reset()
-        self.goal = self.generate_goal()
+            if self.move_object:
+                state = self.starting_states[np.random.choice(len(self.starting_states))]
+                obs, _ = self.reset_to(state)
+            else:
+                obs = self.env_wrapper.reset()
+                self.goal = self.generate_goal()
         return obs, self.goal
 
     def reset_to(self, state):
@@ -188,6 +197,19 @@ class PickPlaceGoalPick(gym.Env):
     @property
     def actions_low(self):
         return self.action_space.low
+
+    def load_starting_states_for_pick(self):
+        path = os.path.join("./data/finished_reach/", f"data{MPI.COMM_WORLD.Get_rank()}.hdf5")
+        with h5py.File(path, "r+") as g:
+            states = list(g["states"].keys())
+            assert len(states) > 0
+            first_state = g["states/0"]
+            states_np = np.zeros(shape=(len(states), first_state.shape[0]))
+            for i in range(len(states)):
+                state = g[f"states/{i}"][()]
+                states_np[i] = state
+            self.starting_states = states_np
+
 
         
 DEMO_PATH = "/home/rayageorgieva/uni/masters/pick_place_robosuite/demo/low_dim.hdf5"
