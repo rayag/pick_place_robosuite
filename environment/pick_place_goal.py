@@ -28,7 +28,7 @@ class PickPlaceGoalPick(gym.Env):
         self.env_wrapper.gym_env.seed(seed)
         self.move_object = move_object
         self.discard_gripper = not move_object
-        self.goal_dim = 6 # coordinates of the object
+        self.goal_dim =  3 if move_object else 6 # coordinates of the object
         self.observation_space = self.env_wrapper.gym_env.observation_space
         self.action_space = self.env_wrapper.gym_env.action_space
         self.goal = None
@@ -92,7 +92,7 @@ class PickPlaceGoalPick(gym.Env):
         target_z = rs_env.target_bin_placements[CAN_IDX][2]
         x = np.random.uniform(low=target_x-x_range, high=target_x+x_range)
         y = np.random.uniform(low=target_y-y_range, high=target_y+y_range)
-        return np.array([x,y,target_z])
+        return np.array([x,y,target_z+np.random.uniform(low=0.1, high=0.2)])
 
     def generate_goal_pick_old(self):
         rs_env = self.env_wrapper.gym_env.env
@@ -119,7 +119,7 @@ class PickPlaceGoalPick(gym.Env):
             z = obj_pos[2]
         else:
             z = obj_pos[2] + np.random.uniform(low=0.1, high=0.2)
-        return np.array([x,y,z, 0,0,0])
+        return np.array([x,y,z])
 
     def generate_goal_reach(self):
         # Goal is EEF end pos (x,y,z) and distance from EEF to Can
@@ -163,7 +163,7 @@ class PickPlaceGoalPick(gym.Env):
 
     def get_achieved_goal_from_obs(self, obs):
         if self.move_object:
-            return np.concatenate((self.extract_can_pos_from_obs(obs), self.extract_can_to_eef_dist_from_obs(obs)))
+            return self.extract_can_pos_from_obs(obs)
         else:
             return np.concatenate((self.extract_eef_pos_from_obs(obs), self.extract_can_to_eef_dist_from_obs(obs)))
 
