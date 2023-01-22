@@ -92,7 +92,7 @@ class PickPlaceGoalPick(gym.Env):
         target_z = rs_env.target_bin_placements[CAN_IDX][2]
         x = np.random.uniform(low=target_x-x_range, high=target_x+x_range)
         y = np.random.uniform(low=target_y-y_range, high=target_y+y_range)
-        return np.array([x,y,target_z])
+        return np.array([x,y,1,0,0,0])
 
     def generate_goal_pick_old(self):
         rs_env = self.env_wrapper.gym_env.env
@@ -226,10 +226,10 @@ def get_goal(env: PickPlaceGoalPick, ep_obs):
 
 def inspect_observations(visualize = False):
     env_cfg = PICK_PLACE_DEFAULT_ENV_CFG
-    env_cfg['pick_only'] = True
+    env_cfg['pick_only'] = False
     if visualize:
         env_cfg['has_renderer'] = visualize
-    env = PickPlaceGoalPick(env_config=env_cfg, p=0, move_object=False)
+    env = PickPlaceGoalPick(env_config=env_cfg, p=0, move_object=True)
     with h5py.File(DEMO_PATH, "r+") as f:
         demos = list(f['data'].keys())
         print(f"Total episodes {len(demos)}")
@@ -243,6 +243,7 @@ def inspect_observations(visualize = False):
             acts = f["data/{}/actions".format(ep)][()]
             obs_data = f["data/{}/obs_flat".format(ep)][()]
             obs, goal = env.reset_to(states[0])
+            goal = np.array([0.15091759,  0.12937487,  1.00869827, 0,0,0])
             # goal, _ = get_goal(env, obs_data)
             if goal is None:
                 continue
@@ -258,6 +259,7 @@ def inspect_observations(visualize = False):
                     action = acts[t]
                     action[4:6] = 0
                 obs, achieved_goal = env.step(action)
+                print(f"AG: {achieved_goal}")
                 reward = env.get_reward_fn()(achieved_goal, goal)
                 done = reward == 0.0
                 if done:
