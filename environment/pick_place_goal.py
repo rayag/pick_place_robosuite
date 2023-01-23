@@ -22,7 +22,7 @@ def get_states_grabbed_can():
         return states_np
 
 class PickPlaceGoalPick(gym.Env):
-    def __init__(self, env_config=PICK_PLACE_DEFAULT_ENV_CFG, seed=None, p=1, pg=0, move_object=True) -> None:
+    def __init__(self, env_config=PICK_PLACE_DEFAULT_ENV_CFG, seed=None, p=1, pg=0, move_object=True, use_predefined_states=True, start_from_middle=False) -> None:
         super().__init__()
         self.env_wrapper = PickPlaceWrapper(env_config=env_config)
         self.env_wrapper.gym_env.seed(seed)
@@ -35,10 +35,10 @@ class PickPlaceGoalPick(gym.Env):
         self.states_grabbed_can = np.empty(shape=(160,71)) # TODO: remove magic
         self.p = p
         self.pg = pg
-        if self.move_object:
-            self.load_starting_states_for_pick()
-        else:
-            self.starting_states = None
+        self.use_predefined_states = use_predefined_states
+        self.start_from_middle = start_from_middle
+        self.load_starting_states_for_reach()
+        self.load_starting_states_for_pick()
 
     def load_states_with_object_grabbed(self):
         self.states_grabbed_can = get_states_grabbed_can()
@@ -66,8 +66,9 @@ class PickPlaceGoalPick(gym.Env):
             obs, _ = self.step([0,0,0,0,0,0,1])
             obs, _ = self.step([0,0,0,0,0,0,0.7])
         else:
-            if self.move_object:
-                state = self.starting_states[np.random.choice(len(self.starting_states))]
+            if self.use_predefined_states:
+                states = self.starting_states_pick if self.start_from_middle else self.starting_states_reach
+                state = states[np.random.choice(len(states))]
                 obs, _ = self.reset_to(state)
             else:
                 obs = self.env_wrapper.reset()
@@ -90,8 +91,8 @@ class PickPlaceGoalPick(gym.Env):
         target_x = rs_env.target_bin_placements[CAN_IDX][0]
         target_y = rs_env.target_bin_placements[CAN_IDX][1]
         target_z = rs_env.target_bin_placements[CAN_IDX][2]
-        x = np.random.uniform(low=target_x-x_range, high=target_x+x_range)
-        y = np.random.uniform(low=target_y-y_range, high=target_y+y_range)
+        x = target_x #np.random.uniform(low=target_x-x_range, high=target_x+x_range)
+        y = target_y #np.random.uniform(low=target_y-y_range, high=target_y+y_range)
         return np.array([x,y,1,0,0,0])
 
     def generate_goal_pick_old(self):
@@ -208,9 +209,19 @@ class PickPlaceGoalPick(gym.Env):
             for i in range(len(states)):
                 state = g[f"states/{i}"][()]
                 states_np[i] = state
-            self.starting_states = states_np
+            self.starting_states_pick = states_np
 
-
+    def load_starting_states_for_reach(self):
+        path = os.path.join("./data/successful_reach/", f"data{MPI.COMM_WORLD.Get_rank()}.hdf5")
+        with h5py.File(path, "r+") as g:
+            states = list(g["states"].keys())
+            assert len(states) > 0
+            first_state = g["states/0"]
+            states_np = np.zeros(shape=(len(states), first_state.shape[0]))
+            for i in range(len(states)):
+                state = g[f"states/{i}"][()]
+                states_np[i] = state
+            self.starting_states_reach = states_np
         
 DEMO_PATH = "/home/rayageorgieva/uni/masters/pick_place_robosuite/demo/low_dim.hdf5"
 
@@ -243,11 +254,12 @@ def inspect_observations(visualize = False):
             acts = f["data/{}/actions".format(ep)][()]
             obs_data = f["data/{}/obs_flat".format(ep)][()]
             obs, goal = env.reset_to(states[0])
+            print(f"GOAL: {goal}")
             goal = np.array([0.15091759,  0.12937487,  1.00869827, 0,0,0])
             # goal, _ = get_goal(env, obs_data)
             if goal is None:
                 continue
-            print(f"GOAL: {goal}")
+            
             sum_steps += states.shape[0]
             t = 0
             ep_return = 0
@@ -263,6 +275,7 @@ def inspect_observations(visualize = False):
                 reward = env.get_reward_fn()(achieved_goal, goal)
                 done = reward == 0.0
                 if done:
+                    print(f"            STEPS: {t}            ")
                     break
                 ep_return += reward
                 t = t + 1

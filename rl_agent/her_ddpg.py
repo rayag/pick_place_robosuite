@@ -238,6 +238,7 @@ class DDPGHERAgent:
         done = False
         goal = self.env.generate_goal_reach()
         move_object = self.env.move_object
+        self.env.use_predefined_states = True
         self.env.move_object = False
         t = 0
         while not done and t < self.helper_T:
@@ -525,6 +526,8 @@ class DDPGHERAgent:
                     self.goal_normalizer.set_mean_std(f['goal_norm_mean'][()], f['goal_norm_std'][()])
             else:
                 print("Using default mean and std for normalizer")
+        else:
+            raise Exception(f"{path} does NOT exist")
     
     def _load_policy(self, policy, path,obs_norm=None, goal_norm=None):
         if os.path.exists(path):
@@ -596,6 +599,8 @@ def main():
     parser.add_argument('--horizon', type=int, default=150)
     parser.add_argument('--seed', default=59, help="Random seed")
     parser.add_argument('--move_object', default=False, action='store_true')
+    parser.add_argument('--use_states', default=False, action='store_true')
+    parser.add_argument('--start_from_middle', default=False, action='store_true')
     parser.add_argument('-a', '--action', choices=['train', 'rollout'], default='train')
     parser.add_argument('--beh_pi', type=str, help="Path to behavioral policy weights", default=None)
     parser.add_argument('--helper_pi', type=str, help="Path to helper policy")
@@ -608,7 +613,7 @@ def main():
     env_cfg['initialization_noise'] = None
     
     if args.action == 'train':
-        env = PickPlaceGoalPick(env_config=env_cfg, p=0, pg=0, move_object=args.move_object)
+        env = PickPlaceGoalPick(env_config=env_cfg, p=0, pg=0, move_object=args.move_object, use_predefined_states=args.use_states, start_from_middle=args.start_from_middle)
         sync_envs(env)
         set_random_seeds(args.seed, env)
         agent = DDPGHERAgent(env=env, env_cfg=env_cfg, obs_dim=env.obs_dim, 
@@ -632,8 +637,8 @@ def main():
             future_goals=int(args.k))
     elif args.action == 'rollout':
         env_cfg['has_renderer'] = True
-        env = PickPlaceGoalPick(env_config=env_cfg, p=0, move_object=args.move_object)
-        # set_random_seeds(args.seed, env)
+        env = PickPlaceGoalPick(env_config=env_cfg, p=0, move_object=args.move_object, use_predefined_states=args.use_states, start_from_middle=args.start_from_middle)
+        set_random_seeds(args.seed, env)
         agent = DDPGHERAgent(env=env, env_cfg=env_cfg, obs_dim=env.obs_dim, 
             episode_len=args.horizon,
             action_dim=env.action_dim, 
