@@ -104,7 +104,7 @@ class PickPlaceGoalPick(gym.Env):
 
     def generate_goal(self):
         if self.move_object:
-            return self.generate_goal_pick()
+            return self.generate_goal_can()
         else:
             return self.generate_goal_reach()
     
