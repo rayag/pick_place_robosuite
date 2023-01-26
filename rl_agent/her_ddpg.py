@@ -110,7 +110,7 @@ class DDPGHERAgent:
     def __init__(self, env: PickPlaceGoalPick, env_cfg: any,  obs_dim: int, action_dim: int, goal_dim: int, 
         episode_len: int=200, update_iterations: int=4, batch_size: int=256, actor_lr :float=1e-3, 
         critic_lr: float = 1e-3, input_clip_range: float=5, descr: str='', results_dir: str='./results', 
-        normalize_data: bool=True, checkpoint_dir: str=None, behavioral_policy_dir: str=None, use_demos=False,
+        normalize_data: bool=True, checkpoint_dir: str=None, use_demos=False,
         helper_policy_dir: str=None, helper_T: int=150) -> None:
         self.env = env
         self.env_cfg = env_cfg
@@ -148,15 +148,6 @@ class DDPGHERAgent:
 
         self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=actor_lr)
         self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=critic_lr)
-
-        if behavioral_policy_dir is not None:
-            self.behavioral_policy = ActorNetworkLowDim(obs_dim=self.obs_dim + self.goal_dim, action_dim=self.action_dim, 
-                action_low=self.env.actions_low, action_high=self.env.actions_high)
-            self._load_policy(self.behavioral_policy, behavioral_policy_dir)
-            # self._load_from(behavioral_policy_dir)
-            self.beh_T = 150
-        else:
-            self.behavioral_policy = None
 
         if helper_policy_dir is not None:
             self.helper_policy = ActorNetworkLowDim(obs_dim=self.obs_dim + self.goal_dim, action_dim=self.action_dim, 
@@ -207,12 +198,9 @@ class DDPGHERAgent:
             done = False
             ep_return = 0
             if self.helper_policy is not None:
-                obs, first_policy_done = self._run_helper_policy_till_completion(obs, goal, True)
-                print(first_policy_done)
-                print(obs[7:10])
-                print(np.linalg.norm(obs[7:10]-np.array([0,0,0])))
+                obs, first_policy_done = self._run_helper_policy_till_completion(obs, True)
+                print(f'Reach done: {first_policy_done}')
                 time.sleep(1)
-            original_can_pos = self.env.extract_can_pos_from_obs(obs)
             while not done and t < steps:
                 obs_norm = np.squeeze(self.obs_normalizer.normalize(obs))
                 goal_norm = np.squeeze(self.goal_normalizer.normalize(goal))
@@ -223,10 +211,6 @@ class DDPGHERAgent:
                 next_obs, achieved_goal = self.env.step(action_dateched)
                 reward = self.reward_fn(achieved_goal, goal)
                 done = (reward == 0)
-                # if np.linalg.norm(original_can_pos - self.env.extract_can_pos_from_obs(obs)) > 0.002 and not done:
-                #     goal[:3] = self.env.extract_can_pos_from_obs(obs) + np.random.uniform(0.001, 0.003)
-                #     original_can_pos = goal[:3]
-                #     print(f"New goal {goal}")
                 obs = next_obs
                 t += 1
                 ep_return += reward
@@ -234,7 +218,7 @@ class DDPGHERAgent:
             print(f"Episode {ep}: return {ep_return} done {done}")
         self.env.pg = old_pg
 
-    def _run_helper_policy_till_completion(self, obs, goal, render=False):
+    def _run_helper_policy_till_completion(self, obs, render=False):
         done = False
         goal = self.env.generate_goal_reach()
         move_object = self.env.move_object
@@ -259,52 +243,6 @@ class DDPGHERAgent:
         self.env.move_object = move_object
         return obs, done
 
-    def generate_episode_with_beh_policy(self):
-        ep_obs = np.zeros(shape=(self.episode_len, self.obs_dim))
-        ep_actions = np.zeros(shape=(self.episode_len, self.action_dim))
-        ep_next_obs = np.zeros(shape=(self.episode_len, self.obs_dim))
-        ep_rewards = np.zeros(shape=(self.episode_len, 1))
-        ep_achieved_goals = np.zeros(shape=(self.episode_len, self.goal_dim))
-        ep_desired_goals = np.zeros(shape=(self.episode_len, self.goal_dim))
-        
-        actor_loss, critic_loss = 0, 0
-        reward = 0
-        grip = 0
-        reached = False
-        obs, original_goal = self.env.reset()
-        goal = original_goal.copy()
-        t = 0
-        while t < self.episode_len:
-            obs_norm = np.squeeze(self.obs_normalizer.normalize(obs))
-            goal_norm = np.squeeze(self.goal_normalizer.normalize(goal))
-            obs_goal_norm_torch = torch.FloatTensor(np.concatenate((obs_norm, goal_norm))).to(device)
-
-            if reached and grip < 2:
-                action_detached = np.array([0,0,0,0,0,0,1])
-                grip += 1
-            else:
-                action = self.behavioral_policy(obs_goal_norm_torch)
-                action_detached = (action.cpu().detach().numpy()+np.random.normal(scale=0.1, size=self.action_dim))\
-                    .clip(self.env.actions_low, self.env.actions_high)
-            next_obs, achieved_goal = self.env.step(action_detached)
-            reward = self.reward_fn(achieved_goal, goal)
-            if not reached and self.env.calc_reward_reach(achieved_goal, goal):
-                reached = True
-                tmp = goal.copy()
-                tmp[:3] = goal[3:]
-                goal = tmp
-
-            ep_obs[t] = obs
-            ep_actions[t] = action_detached.copy()
-            ep_next_obs[t] = next_obs
-            ep_rewards[t] = reward
-            ep_achieved_goals[t] = achieved_goal
-            ep_desired_goals[t] = original_goal
-            obs = next_obs
-            t = t+1
-        self.replay_buffer.add_episode(ep_obs, ep_actions, ep_next_obs, ep_rewards, ep_achieved_goals, ep_desired_goals)
-
-
     def train(self, epochs=200, iterations_per_epoch=100, episodes_per_iter=1000, exploration_eps=0.1, future_goals = 4):
         if self.use_demonstrations:
             if MPI.COMM_WORLD.Get_rank() == 0:
@@ -320,16 +258,13 @@ class DDPGHERAgent:
             self._sync_network_parameters(self.critic)
             self._sync_network_parameters(self.critic_target)
 
-        beh_policy_prob = 0.5
         exploration_eps_decay = 0.98
         for epoch in range(epochs):
             if MPI.COMM_WORLD.Get_rank() == 0:
-                self.logger.print_and_log_output(f"Starting epoch {epoch}, behavioral policy probability: {beh_policy_prob}")
-            epoch_success_count = 0
+                self.logger.print_and_log_output(f"Starting epoch {epoch}")
             start_epoch = time.time()
             helper_success = 0
             for it in range(iterations_per_epoch):
-                it_start = time.time()
                 iteration_success_count = 0
                 success = False
                 started_episodes = 0
@@ -337,7 +272,7 @@ class DDPGHERAgent:
                 for ep in range(episodes_per_iter//self.proc_count):
                     obs, goal = self.env.reset()
                     if self.helper_policy is not None:
-                        obs, helper_done = self._run_helper_policy_till_completion(obs, goal)
+                        obs, helper_done = self._run_helper_policy_till_completion(obs)
                         if helper_done:
                             helper_success += 1
 
@@ -354,19 +289,16 @@ class DDPGHERAgent:
                     
                     actor_loss, critic_loss = 0, 0
                     reward = 0
-                    original_can_pos = self.env.extract_can_pos_from_obs(obs)
-                    for t in range(self.episode_len):
+                    for t in range(0):
                         obs_norm = np.squeeze(self.obs_normalizer.normalize(obs))
                         goal_norm = np.squeeze(self.goal_normalizer.normalize(goal))
                         obs_goal_norm_torch = torch.FloatTensor(np.concatenate((obs_norm, goal_norm))).to(device)
                         p = np.random.rand()
+                        action_detached = np.random.uniform(size=self.action_dim, low=self.env.actions_low, high=self.env.actions_high)
                         if p < exploration_eps:
                             action_detached = np.random.uniform(size=self.action_dim, low=self.env.actions_low, high=self.env.actions_high)
                         else:
-                            if self.behavioral_policy is not None and np.random.rand() < beh_policy_prob:
-                                action = self.behavioral_policy(obs_goal_norm_torch)
-                            else:
-                                action = self.actor(obs_goal_norm_torch)
+                            action = self.actor(obs_goal_norm_torch)
                             action_detached = (action.cpu().detach().numpy()+np.random.normal(scale=0.1, size=self.action_dim))\
                                 .clip(self.env.actions_low, self.env.actions_high)
                         next_obs, achieved_goal = self.env.step(action_detached)
@@ -386,14 +318,12 @@ class DDPGHERAgent:
                         #     goal[:3] = self.env.extract_can_pos_from_obs(next_obs) + np.random.uniform(0.001, 0.003)
                         #     original_can_pos = goal[:3]
                     self.replay_buffer.add_episode(ep_obs, ep_actions, ep_next_obs, ep_rewards, ep_achieved_goals, ep_desired_goals)
-                exp_gather_end = time.time()
                 if started_episodes > 0: # if the goal is satisfied at the beginning, we do not start the episode
-                    if self.helper_policy is None and self.normalize_data:
+                    if self.normalize_data:
                         self.obs_normalizer.sync_stats()
                         self.goal_normalizer.sync_stats()
                 actor_loss, critic_loss, value = self.update()
                 self.logger.add(0, actor_loss, critic_loss, iteration_success_count, value)
-            beh_policy_prob = np.max([0.1, 0.95*beh_policy_prob])
             end_epoch = time.time()
             success_rate_eval = self._evaluate(10 if self.proc_count <= 4 else 5)
             if epoch > 0 and epoch % 5 == 0:
@@ -464,7 +394,7 @@ class DDPGHERAgent:
             while self.reward_fn(self.env.get_achieved_goal_from_obs(obs), goal) == 0:
                 obs, goal = self.env.reset() # sample goal until it is not initially satisfied
             if self.helper_policy is not None:
-                obs, _ = self._run_helper_policy_till_completion(obs, goal, render)
+                obs, _ = self._run_helper_policy_till_completion(obs, render)
             t = 0
             done = False
             ep_return = 0
@@ -602,7 +532,6 @@ def main():
     parser.add_argument('--use_states', default=False, action='store_true')
     parser.add_argument('--start_from_middle', default=False, action='store_true')
     parser.add_argument('-a', '--action', choices=['train', 'rollout'], default='train')
-    parser.add_argument('--beh_pi', type=str, help="Path to behavioral policy weights", default=None)
     parser.add_argument('--helper_pi', type=str, help="Path to helper policy")
     args = parser.parse_args()
     print(f"Actor alpha {args.actor_lr}, Critic alpha {args.critic_lr} Normalize {args.normalize} Move object {args.move_object} Helper policy {args.helper_pi}")
@@ -626,7 +555,6 @@ def main():
             normalize_data=args.normalize,
             update_iterations=int(args.update_it),
             checkpoint_dir=args.checkpoint,
-            behavioral_policy_dir=args.beh_pi,
             helper_policy_dir=args.helper_pi,
             use_demos=False,
             descr='HER')
@@ -638,7 +566,7 @@ def main():
     elif args.action == 'rollout':
         env_cfg['has_renderer'] = True
         env = PickPlaceGoalPick(env_config=env_cfg, p=0, move_object=args.move_object, use_predefined_states=args.use_states, start_from_middle=args.start_from_middle)
-        set_random_seeds(args.seed, env)
+        # set_random_seeds(args.seed, env)
         agent = DDPGHERAgent(env=env, env_cfg=env_cfg, obs_dim=env.obs_dim, 
             episode_len=args.horizon,
             action_dim=env.action_dim, 
@@ -649,10 +577,9 @@ def main():
             normalize_data=args.normalize,
             update_iterations=int(args.update_it),
             checkpoint_dir=args.checkpoint,
-            behavioral_policy_dir=args.beh_pi,
             helper_policy_dir=args.helper_pi,
             descr='ROLLOUT')
-        agent.rollout(episodes=10, steps=args.horizon)
+        agent.rollout(episodes=20, steps=args.horizon)
 
 if __name__ == '__main__':
     main()
