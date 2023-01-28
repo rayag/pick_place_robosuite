@@ -22,7 +22,7 @@ def get_states_grabbed_can():
         return states_np
 
 class PickPlaceGoalPick(gym.Env):
-    def __init__(self, env_config=PICK_PLACE_DEFAULT_ENV_CFG, seed=None, p=1, pg=0, move_object=True, use_predefined_states=True, start_from_middle=False) -> None:
+    def __init__(self, env_config=PICK_PLACE_DEFAULT_ENV_CFG, seed=None, prob_goal_air=1, move_object=True, use_predefined_states=True, start_from_middle=False, dense_reward=False) -> None:
         super().__init__()
         self.env_wrapper = PickPlaceWrapper(env_config=env_config)
         self.env_wrapper.gym_env.seed(seed)
@@ -32,9 +32,9 @@ class PickPlaceGoalPick(gym.Env):
         self.observation_space = self.env_wrapper.gym_env.observation_space
         self.action_space = self.env_wrapper.gym_env.action_space
         self.goal = None
+        self.dense_reward = dense_reward
         self.states_grabbed_can = np.empty(shape=(160,71)) # TODO: remove magic
-        self.p = p
-        self.pg = pg
+        self.prob_goal_air = prob_goal_air
         self.use_predefined_states = use_predefined_states
         self.start_from_middle = start_from_middle
         self.load_starting_states_for_reach()
@@ -59,20 +59,13 @@ class PickPlaceGoalPick(gym.Env):
         '''
         return observation, desired goal
         '''
-        if np.random.rand() < self.pg:
-            i = np.random.randint(self.states_grabbed_can.shape[0])
-            obs = self.env_wrapper.reset_to(self.states_grabbed_can[i])
-            obs, _ = self.step([0,0,0,0,0,0,1])
-            obs, _ = self.step([0,0,0,0,0,0,1])
-            obs, _ = self.step([0,0,0,0,0,0,0.7])
+        if self.use_predefined_states:
+            states = self.starting_states_pick if self.start_from_middle else self.starting_states_reach
+            state = states[np.random.choice(len(states))]
+            obs, _ = self.reset_to(state)
         else:
-            if self.use_predefined_states:
-                states = self.starting_states_pick if self.start_from_middle else self.starting_states_reach
-                state = states[np.random.choice(len(states))]
-                obs, _ = self.reset_to(state)
-            else:
-                obs = self.env_wrapper.reset()
-                self.goal = self.generate_goal()
+            obs = self.env_wrapper.reset()
+            self.goal = self.generate_goal()
         return obs, self.goal
 
     def reset_to(self, state):
@@ -116,7 +109,7 @@ class PickPlaceGoalPick(gym.Env):
         y = obj_pos[1] + np.random.uniform(low=0.02, high=0.1)
         # sometimes the goal should be on the table
         prob = np.random.rand()
-        if (prob < self.p or not self.move_object):
+        if (prob < self.prob_goal_air or not self.move_object):
             z = obj_pos[2]
         else:
             z = obj_pos[2] + np.random.uniform(low=0.1, high=0.2)
@@ -139,14 +132,19 @@ class PickPlaceGoalPick(gym.Env):
         return 1.0 if goal_reached else 0.0
 
     @staticmethod
-    def calc_reward_pick(achieved_goal, desired_goal):
-        goal_reached = np.linalg.norm(achieved_goal[:3] - desired_goal[:3], axis=-1) < 0.01
+    def calc_reward_pick_sparse(achieved_goal, desired_goal):
+        goal_reached = np.linalg.norm(achieved_goal - desired_goal, axis=-1) < 0.01
         return 0.0 if goal_reached else -1.0
+
+    @staticmethod
+    def calc_reward_pick_dense(achieved_goal, desired_goal):
+        return 1 - np.linalg.norm(achieved_goal[:3] - desired_goal[:3], axis=-1)
 
     @staticmethod
     def calc_reward_reach(achieved_goal, desired_goal):
         # achieved_gripper_pos = achieved_goal[:3]
         # desired_gripper_pos = desired_goal[:3]
+        print(f'AG: {achieved_goal} DG: {desired_goal}Dense reward {- np.linalg.norm(achieved_goal[:3] - desired_goal[:3], axis=-1)}')
         goal_reached = np.linalg.norm(achieved_goal[3:] - desired_goal[3:], axis=-1) < 0.01
         return 0 if goal_reached else -1
 
@@ -170,7 +168,7 @@ class PickPlaceGoalPick(gym.Env):
 
     def get_reward_fn(self):
         if self.move_object:
-            return self.calc_reward_pick
+            return self.calc_reward_pick_sparse
         else:
             return self.calc_reward_reach
 
@@ -240,13 +238,13 @@ def inspect_observations(visualize = False):
     env_cfg['pick_only'] = False
     if visualize:
         env_cfg['has_renderer'] = visualize
-    env = PickPlaceGoalPick(env_config=env_cfg, p=0, move_object=True)
+    env = PickPlaceGoalPick(env_config=env_cfg, prob_goal_air=0, move_object=False)
     with h5py.File(DEMO_PATH, "r+") as f:
         demos = list(f['data'].keys())
         print(f"Total episodes {len(demos)}")
         sum_steps = 0
         dist = []
-        for i in range(len(demos)):
+        for i in range(2,3):
             print(f"Episode {i} ...")
             ep = demos[i]
             ep_id = int(demos[i][5:])
@@ -254,8 +252,8 @@ def inspect_observations(visualize = False):
             acts = f["data/{}/actions".format(ep)][()]
             obs_data = f["data/{}/obs_flat".format(ep)][()]
             obs, goal = env.reset_to(states[0])
+            print()
             print(f"GOAL: {goal}")
-            goal = np.array([0.15091759,  0.12937487,  1.00869827, 0,0,0])
             # goal, _ = get_goal(env, obs_data)
             if goal is None:
                 continue
@@ -271,7 +269,6 @@ def inspect_observations(visualize = False):
                     action = acts[t]
                     action[4:6] = 0
                 obs, achieved_goal = env.step(action)
-                print(f"AG: {achieved_goal}")
                 reward = env.get_reward_fn()(achieved_goal, goal)
                 done = reward == 0.0
                 if done:

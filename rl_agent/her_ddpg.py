@@ -188,9 +188,7 @@ class DDPGHERAgent:
             normalize_data=normalize_data)
 
     def rollout(self, episodes = 10, steps = 250):
-        old_pg = self.env.pg
-        self.env.pg = 0
-        self.env.p = 0
+        self.env.prob_goal_air = 0
         for ep in range(episodes):
             obs, goal = self.env.reset()
             print(f"Goal: {goal}")
@@ -216,7 +214,6 @@ class DDPGHERAgent:
                 ep_return += reward
                 self.env.render()
             print(f"Episode {ep}: return {ep_return} done {done}")
-        self.env.pg = old_pg
 
     def _run_helper_policy_till_completion(self, obs, render=False):
         done = False
@@ -385,8 +382,6 @@ class DDPGHERAgent:
         return actor_losses.mean().detach(), critic_losses.mean().detach(), values.mean().detach()
 
     def _evaluate(self, episodes=10, render=False):
-        old_pg = self.env.pg
-        self.env.pg = 0
         successful_episodes = 0
         print(f"{MPI.COMM_WORLD.Get_rank()} Start eval")
         for ep in range(episodes):
@@ -422,7 +417,6 @@ class DDPGHERAgent:
         print(f"{MPI.COMM_WORLD.Get_rank()} success rate {local_success_rate}")
         global_success_rate = MPI.COMM_WORLD.allreduce(local_success_rate, op=MPI.SUM)
         global_success_rate /= MPI.COMM_WORLD.Get_size()
-        self.env.pg = old_pg
         return global_success_rate
 
 
@@ -533,6 +527,7 @@ def main():
     parser.add_argument('--start_from_middle', default=False, action='store_true')
     parser.add_argument('-a', '--action', choices=['train', 'rollout'], default='train')
     parser.add_argument('--helper_pi', type=str, help="Path to helper policy")
+    parser.add_argument('--descr', type=str, default="")
     args = parser.parse_args()
     print(f"Actor alpha {args.actor_lr}, Critic alpha {args.critic_lr} Normalize {args.normalize} Move object {args.move_object} Helper policy {args.helper_pi}")
 
@@ -540,9 +535,10 @@ def main():
     env_cfg['pick_only'] = True
     env_cfg['horizon'] = 150
     env_cfg['initialization_noise'] = None
+    env_cfg['has_renderer'] = True
     
     if args.action == 'train':
-        env = PickPlaceGoalPick(env_config=env_cfg, p=0, pg=0, move_object=args.move_object, use_predefined_states=args.use_states, start_from_middle=args.start_from_middle)
+        env = PickPlaceGoalPick(env_config=env_cfg, prob_goal_air=0, move_object=args.move_object, use_predefined_states=args.use_states, start_from_middle=args.start_from_middle)
         sync_envs(env)
         set_random_seeds(args.seed, env)
         agent = DDPGHERAgent(env=env, env_cfg=env_cfg, obs_dim=env.obs_dim, 
@@ -557,15 +553,17 @@ def main():
             checkpoint_dir=args.checkpoint,
             helper_policy_dir=args.helper_pi,
             use_demos=False,
-            descr='HER')
+            descr='HER'+args.descr)
         agent.train(epochs=int(args.epochs), 
             iterations_per_epoch=int(args.it_per_epoch), 
             episodes_per_iter=int(args.ep_per_it), 
             exploration_eps=float(args.exp_eps), 
             future_goals=int(args.k))
+        if MPI.COMM_WORLD.Get_rank() == 0:
+            agent._evaluate(20, True)
     elif args.action == 'rollout':
         env_cfg['has_renderer'] = True
-        env = PickPlaceGoalPick(env_config=env_cfg, p=0, move_object=args.move_object, use_predefined_states=args.use_states, start_from_middle=args.start_from_middle)
+        env = PickPlaceGoalPick(env_config=env_cfg, prob_goal_air=0, move_object=args.move_object, use_predefined_states=args.use_states, start_from_middle=args.start_from_middle)
         # set_random_seeds(args.seed, env)
         agent = DDPGHERAgent(env=env, env_cfg=env_cfg, obs_dim=env.obs_dim, 
             episode_len=args.horizon,
