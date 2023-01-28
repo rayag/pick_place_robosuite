@@ -16,6 +16,7 @@ import argparse
 import time
 import threading
 import h5py
+import git
 
 device = 'cpu'#torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -179,6 +180,7 @@ class DDPGHERAgent:
             print(f"Number of processes {self.proc_count}")
             if not os.path.exists(self.path):
                 os.makedirs(self.path)
+        self._save_githash()
         self.logger = ProgressLogger(self.path)
 
     def init_replay_buffer(self, episode_len, normalize_data, input_clip_range, obs_normalizer, goal_normalizer):
@@ -459,6 +461,12 @@ class DDPGHERAgent:
                 print("Using default mean and std for normalizer")
         else:
             raise Exception(f"{path} does NOT exist")
+
+    def _save_githash(self):
+        repo = git.Repo(search_parent_directories=True)
+        sha = repo.head.object.hexsha
+        with open(os.path.join(self.path, "githash"), 'w+') as f:
+            f.write(sha)
     
     def _load_policy(self, policy, path,obs_norm=None, goal_norm=None):
         if os.path.exists(path):
@@ -570,11 +578,11 @@ def main():
             helper_policy_dir=args.helper_pi,
             use_demos=False,
             descr='HER'+args.descr)
-        agent.train(epochs=int(args.epochs), 
-            iterations_per_epoch=int(args.it_per_epoch), 
-            episodes_per_iter=int(args.ep_per_it), 
-            exploration_eps=float(args.exp_eps), 
-            future_goals=int(args.k))
+        # agent.train(epochs=int(args.epochs), 
+        #     iterations_per_epoch=int(args.it_per_epoch), 
+        #     episodes_per_iter=int(args.ep_per_it), 
+        #     exploration_eps=float(args.exp_eps), 
+        #     future_goals=int(args.k))
     elif args.action == 'rollout':
         env_cfg['has_renderer'] = True
         env = PickPlaceGoalPick(env_config=env_cfg, prob_goal_air=0, move_object=args.move_object, use_predefined_states=args.use_states, start_from_middle=args.start_from_middle)
