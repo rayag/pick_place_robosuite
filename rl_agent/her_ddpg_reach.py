@@ -180,7 +180,7 @@ class DDPGHERAgent:
             print(f"Number of processes {self.proc_count}")
             if not os.path.exists(self.path):
                 os.makedirs(self.path)
-        self._save_githash()
+            self._save_githash()
         self.logger = ProgressLogger(self.path)
 
     def init_replay_buffer(self, episode_len, normalize_data, input_clip_range, obs_normalizer, goal_normalizer):
