@@ -109,7 +109,7 @@ class PickPlaceGoalPick(gym.Env):
         y = obj_pos[1] + np.random.uniform(low=0.02, high=0.1)
         # sometimes the goal should be on the table
         prob = np.random.rand()
-        if (prob < self.prob_goal_air or not self.move_object):
+        if prob > self.prob_goal_air:
             z = obj_pos[2]
         else:
             z = obj_pos[2] + np.random.uniform(low=0.1, high=0.2)
@@ -137,14 +137,14 @@ class PickPlaceGoalPick(gym.Env):
         return 0.0 if goal_reached else -1.0
 
     @staticmethod
-    def calc_reward_pick_dense(achieved_goal, desired_goal):
-        return 1 - np.linalg.norm(achieved_goal[:3] - desired_goal[:3], axis=-1)
+    def calc_reward_dense(achieved_goal, desired_goal):
+        reward = -np.linalg.norm(achieved_goal - desired_goal, axis=-1)
+        return reward if reward < -0.01 else 0
 
     @staticmethod
-    def calc_reward_reach(achieved_goal, desired_goal):
+    def calc_reward_reach_sparse(achieved_goal, desired_goal):
         # achieved_gripper_pos = achieved_goal[:3]
         # desired_gripper_pos = desired_goal[:3]
-        print(f'AG: {achieved_goal} DG: {desired_goal}Dense reward {- np.linalg.norm(achieved_goal[:3] - desired_goal[:3], axis=-1)}')
         goal_reached = np.linalg.norm(achieved_goal[3:] - desired_goal[3:], axis=-1) < 0.01
         return 0 if goal_reached else -1
 
@@ -168,9 +168,15 @@ class PickPlaceGoalPick(gym.Env):
 
     def get_reward_fn(self):
         if self.move_object:
-            return self.calc_reward_pick_sparse
+            if self.dense_reward:
+                return self.calc_reward_dense
+            else:
+                return self.calc_reward_pick_sparse
         else:
-            return self.calc_reward_reach
+            if self.dense_reward:
+                return self.calc_reward_dense
+            else:
+                return self.calc_reward_reach_sparse
 
     # def get_achieved_goal_from_obs(self, obs):
     #     if self.move_object:
