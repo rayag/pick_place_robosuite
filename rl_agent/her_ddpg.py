@@ -136,13 +136,17 @@ class DDPGHERAgent:
         self.critic = CriticNetworkLowDim(self.obs_dim, self.action_dim, self.goal_dim)
         self.critic_target = CriticNetworkLowDim(self.obs_dim, self.action_dim, self.goal_dim)
 
-        if checkpoint_dir is not None and MPI.COMM_WORLD.Get_rank() == 0:
-            self._load_from(checkpoint_dir)
-
-        self._sync_network_parameters(self.actor)
-        self._sync_network_parameters(self.critic)
-
-        if checkpoint_dir is None: # we set the target weights only if they are not loaded from checkpoint
+        if checkpoint_dir is not None:
+            if MPI.COMM_WORLD.Get_rank() == 0:
+                self._load_from(checkpoint_dir) # load policy in root process
+            # sync with other processes
+            self._sync_normalizer_parameters(self.obs_normalizer)
+            self._sync_normalizer_parameters(self.goal_normalizer)
+            self._sync_network_parameters(self.actor)
+            self._sync_network_parameters(self.critic)
+            self._sync_network_parameters(self.actor_target)
+            self._sync_network_parameters(self.critic_target)
+        else: # we set the target weights only if they are not loaded from checkpoint
             self.actor_target.load_state_dict(self.actor.state_dict())
             self.critic_target.load_state_dict(self.critic.state_dict())
 
@@ -155,6 +159,9 @@ class DDPGHERAgent:
             self.helper_obs_norm = Normalizer(self.obs_dim, clip_range=input_clip_range)
             self.helper_goal_norm = Normalizer(self.goal_dim, clip_range=input_clip_range)
             self._load_policy(self.helper_policy, helper_policy_dir, self.helper_obs_norm, self.helper_goal_norm)
+            self._sync_normalizer_parameters(self.helper_obs_norm)
+            self._sync_normalizer_parameters(self.helper_goal_norm)
+            self._sync_network_parameters(self.helper_policy)
             self.helper_T = helper_T
         else:
             self.helper_policy = None
@@ -485,6 +492,16 @@ class DDPGHERAgent:
             pos += p.numel()
 
     @staticmethod
+    def _sync_normalizer_parameters(normalizer: Normalizer):
+        comm = MPI.COMM_WORLD
+        mean = normalizer.mean.copy()
+        std = normalizer.std.copy()
+        comm.Bcast(mean, root=0)
+        normalizer.mean = mean
+        comm.Bcast(std, root=0)
+        normalizer.std = std
+
+    @staticmethod
     def _sync_network_grads(net):
         comm = MPI.COMM_WORLD
         grads_np = np.concatenate([p.grad.cpu().numpy().flatten() for p in net.parameters()])
@@ -535,11 +552,10 @@ def main():
     env_cfg['pick_only'] = True
     env_cfg['horizon'] = 150
     env_cfg['initialization_noise'] = None
-    env_cfg['has_renderer'] = True
     
     if args.action == 'train':
-        env = PickPlaceGoalPick(env_config=env_cfg, prob_goal_air=0, move_object=args.move_object, use_predefined_states=args.use_states, start_from_middle=args.start_from_middle)
-        sync_envs(env)
+        env = PickPlaceGoalPick(env_config=env_cfg, prob_goal_air=1, move_object=args.move_object, use_predefined_states=args.use_states, start_from_middle=args.start_from_middle)
+        # sync_envs(env)
         set_random_seeds(args.seed, env)
         agent = DDPGHERAgent(env=env, env_cfg=env_cfg, obs_dim=env.obs_dim, 
             episode_len=args.horizon,
@@ -559,8 +575,6 @@ def main():
             episodes_per_iter=int(args.ep_per_it), 
             exploration_eps=float(args.exp_eps), 
             future_goals=int(args.k))
-        if MPI.COMM_WORLD.Get_rank() == 0:
-            agent._evaluate(20, True)
     elif args.action == 'rollout':
         env_cfg['has_renderer'] = True
         env = PickPlaceGoalPick(env_config=env_cfg, prob_goal_air=0, move_object=args.move_object, use_predefined_states=args.use_states, start_from_middle=args.start_from_middle)
