@@ -47,6 +47,57 @@ class CriticNetwork(nn.Module):
         out = self.output(x)
         return out
 
+class ActorNetworkLowDim(nn.Module): 
+    def __init__(self, obs_dim, action_dim, action_high = 1.0, action_low = 0.0) -> None:
+        super(ActorNetworkLowDim, self).__init__()
+        self.action_dim = action_dim
+        self.action_low_dim = 3
+        self.action_high = torch.FloatTensor(np.full(shape=(self.action_low_dim), fill_value=1)).to(device)
+        self.action_low = torch.FloatTensor(np.full(shape=(self.action_low_dim), fill_value=-1)).to(device)
+        self.input = nn.Linear(obs_dim, 256).to(device) #TODO: allow custom layer sizes
+        self.h1 = nn.Linear(256, 256).to(device)
+        self.h2 = nn.Linear(256, 256).to(device)
+        self.h3 = nn.Linear(256, 256).to(device)
+        self.output = nn.Linear(256, self.action_low_dim).to(device)
+
+    def forward(self, obs):
+        x = F.relu(self.input(obs))
+        x = F.relu(self.h1(x))
+        x = F.relu(self.h2(x))
+        x = F.relu(self.h3(x))
+        action = torch.tanh(self.output(x)) * self.action_high
+        if len(action.size())==1:
+            action_full = torch.zeros(self.action_dim)
+            action_full[:3] = action[:3]
+            action_full[-1] = action[-1]
+        if len(action.size()) == 2:
+            action_full = torch.zeros(action.size()[0], self.action_dim)
+            action_full[:,:3] = action[:,:3]
+            action_full[:,-1] = action[:,-1]
+        return action_full
+
+class CriticNetworkLowDim(nn.Module):
+    def __init__(self, obs_dim, action_dim) -> None:
+        super().__init__()
+        self.low_dim = 3
+        self.input = nn.Linear(obs_dim + self.low_dim, 256).to(device)
+        self.h1 = nn.Linear(256, 256).to(device)
+        self.h2 = nn.Linear(256, 256).to(device)
+        self.h3 = nn.Linear(256, 256).to(device)
+        self.output = nn.Linear(256, 1).to(device)
+
+    def forward(self,s, a):
+        if len(a.size()) == 1:
+            a = a[:self.low_dim]
+        elif len(a.size()) == 2:
+            a = a[:, :self.low_dim]
+        x = F.relu(self.input(torch.cat([s, a.to(device)], 1)))
+        x = F.relu(self.h1(x))
+        x = F.relu(self.h2(x))
+        x = F.relu(self.h3(x))
+        out = self.output(x)
+        return out
+
 class DDPGAgent:
     def __init__(self, 
         env, 
@@ -68,20 +119,20 @@ class DDPGAgent:
         self.episode_len = episode_len
         self.init_replay_buffer(use_experience, demo_dir, episode_len)
 
-        self.actor = ActorNetwork(obs_dim=self.obs_dim, action_dim=self.action_dim)
-        self.actor_target = ActorNetwork(obs_dim=self.obs_dim, action_dim=self.action_dim)
+        self.actor = ActorNetworkLowDim(obs_dim=self.obs_dim, action_dim=self.action_dim)
+        self.actor_target = ActorNetworkLowDim(obs_dim=self.obs_dim, action_dim=self.action_dim)
         self.actor_target.load_state_dict(self.actor.state_dict())
         self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=1e-5)
 
-        self.critic = CriticNetwork(self.obs_dim, self.action_dim)
-        self.critic_target = CriticNetwork(self.obs_dim, self.action_dim)
+        self.critic = CriticNetworkLowDim(self.obs_dim, self.action_dim)
+        self.critic_target = CriticNetworkLowDim(self.obs_dim, self.action_dim)
         self.critic_target.load_state_dict(self.critic.state_dict())
-        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=1e-4)
+        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=1e-5)
 
         self.update_iterations = update_iterations
         self.batch_size = batch_size
         self.gamma = 0.98
-        self.polyak = 0.99
+        self.polyak = 0.995
 
         date_str = datetime.today().strftime('%Y-%m-%d-%H-%M-%S')
         self.path = os.path.join(results_dir, "DDPG-" + descr + "-" + date_str)
@@ -93,6 +144,8 @@ class DDPGAgent:
 
         if checkpoint_dir:
             self._load_from(checkpoint_dir)
+            self.actor_target.load_state_dict(self.actor.state_dict())
+            self.critic_target.load_state_dict(self.critic.state_dict())
         else:
             print("No checkpoint dir specified")
 
@@ -104,21 +157,39 @@ class DDPGAgent:
 
     def rollout(self, episodes = 10, steps = 250):
         for ep in range(episodes):
-            obs = self.env.reset()
+            obs, _ = self.env.reset()
             t = 0
             done = False
             ep_return = 0
-            while not done and t < steps:
+            while  t < steps:
                 obs = torch.FloatTensor(obs).to(device)
                 action = self.actor(obs)
                 action_dateched = action.cpu().detach().numpy()\
                     .clip(self.env.action_space.low, self.env.action_space.high)
-                next_obs, reward, done, _ = self.env.step(action_dateched)
+                next_obs, reward, done, _, _ = self.env.step(action_dateched)
                 obs = next_obs
                 t += 1
                 ep_return += reward
                 self.env.render()
+            time.sleep(2)
             print(f"Episode {ep}: return {ep_return}")
+
+    def rollout_goal_env(self, env, obs, steps = 250):
+        t = 0
+        done = False
+        ep_return = 0
+        while not done and t < steps:
+            obs = torch.FloatTensor(obs).to(device)
+            action = self.actor(obs)
+            action_dateched = action.cpu().detach().numpy()\
+                .clip(env.action_space.low, env.action_space.high)
+            next_obs, reward, _, _, _ = env.step(action_dateched)
+            ep_return += reward
+            obs = next_obs
+            t += 1
+            env.render()
+        print(f"Return: {ep_return}")
+        time.sleep(2)
 
     def train(self, iterations=2000, exploration_p=0.2, updates_before_train=1000, ignore_done=True):
         if self.use_experience:
@@ -131,7 +202,7 @@ class DDPGAgent:
         complete_episodes = 0
         for it in range(iterations):
             start_iteration = time.time()
-            obs = self.env.reset()
+            obs, _ = self.env.reset()
             episode_return = 0
             t = 0
             done = False
@@ -145,7 +216,7 @@ class DDPGAgent:
                 else:
                     action = self.actor(obs)
                     action_dateched = action.cpu().detach().numpy().clip(self.env.action_space.low, self.env.action_space.high)
-                next_obs, reward, done, _ = self.env.step(action_dateched)
+                next_obs, reward, done, _, _ = self.env.step(action_dateched)
                 self.replay_buffer.add(obs.cpu().numpy(), action_dateched, next_obs, reward, False if ignore_done else done)
                 obs = next_obs
                 t += 1
@@ -162,6 +233,10 @@ class DDPGAgent:
                 self.logger.print_last_ten_runs_stat(current_iteration=it)
             if it % 10 == 0:
                 self.save(it)
+            if it % 30 == 0:
+                eval_success_rate, mean_return_eval = self._evaluate()
+                self.logger.add_epoch_data(eval_success_rate)
+                print(f"--- EVAL Success rate {eval_success_rate} Mean return {mean_return_eval}---")
             print(f"Iteration took {time.time() - start_iteration}s Return: {episode_return} Mean Q: {value}")
         print(f"Training took {time.time() - start_train}s")
         self.save(iterations)
@@ -179,7 +254,7 @@ class DDPGAgent:
             done = torch.FloatTensor(done).to(device)
 
             # Update critic network
-            q_next_state = self.critic_target(next_state, self.actor_target(next_state))
+            q_next_state = self.critic_target(next_state, self.actor_target(next_state).to(device))
             if ignore_done:
                 target_q = reward + (self.gamma * q_next_state).detach()
             else:
@@ -209,8 +284,33 @@ class DDPGAgent:
             target_actor_params.data.copy_(self.polyak * target_actor_params.data + (1.0 - self.polyak) * actor_params.data)
         return actor_losses.mean().detach(), critic_losses.mean().detach(), values.mean().detach()
 
+    def _evaluate(self, episodes=10, render=False):
+        successful_episodes = 0
+        returns = []
+        for ep in range(episodes):
+            obs, _ = self.env.reset()
+            t = 0
+            done = False
+            ep_return = 0
+            while not done and t < self.episode_len:
+                obs_goal_norm_torch = torch.FloatTensor(obs).to(device)
+                action = self.actor(obs_goal_norm_torch)
+                action_detached = action.cpu().detach().numpy()\
+                    .clip(self.env.action_space.low, self.env.action_space.high)
+                next_obs, reward, done, _, _  = self.env.step(action_detached)
+                obs = next_obs
+                t += 1
+                ep_return += reward
+                if render:
+                    self.env.render()
+            if done:
+                successful_episodes += 1
+            returns.append(ep_return)
+        success_rate = successful_episodes / episodes
+        return success_rate, np.mean(np.array(returns))
+
     def save(self, it):
-        checkpoint_path = os.path.join(self.path, f"checkpoint_{it:05}")
+        checkpoint_path = os.path.join(self.path, f"checkpoint_{it:06}")
         if not os.path.exists(checkpoint_path):
             os.makedirs(checkpoint_path)
         torch.save(self.actor.state_dict(), os.path.join(checkpoint_path, 'actor_weights.pth'))

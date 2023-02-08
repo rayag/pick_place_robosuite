@@ -52,7 +52,7 @@ class PickPlaceGoalPick(gym.Env):
         '''
         if self.discard_gripper:
             action[-1] = -1 # keep open
-        obs, _, done, info = self.env_wrapper.step(action)
+        obs, _, done, info, _ = self.env_wrapper.step(action)
         return obs, self.get_achieved_goal_from_obs(obs)
 
     def reset(self):
@@ -62,17 +62,26 @@ class PickPlaceGoalPick(gym.Env):
         if self.use_predefined_states:
             states = self.starting_states_pick if self.start_from_middle else self.starting_states_reach
             state = states[np.random.choice(len(states))]
-            obs, _ = self.reset_to(state)
+            return self.reset_to(state)
         else:
-            obs = self.env_wrapper.reset()
+            obs, _ = self.env_wrapper.reset()
             self.goal = self.generate_goal()
+        return obs, self.goal
+
+    def reset_to_predefined_state(self):
+        '''
+        return observation, desired goal
+        '''
+        states = self.starting_states_pick if self.start_from_middle else self.starting_states_reach
+        state = states[np.random.choice(len(states))]
+        obs, _ = self.reset_to(state)
         return obs, self.goal
 
     def reset_to(self, state):
         '''
         return observation, desired goal
         '''
-        obs = self.env_wrapper.reset_to(state)
+        obs, _ = self.env_wrapper.reset_to(state)
         self.goal = self.generate_goal()
         return obs, self.goal
     
@@ -98,7 +107,7 @@ class PickPlaceGoalPick(gym.Env):
 
     def generate_goal(self):
         if self.move_object:
-            return self.generate_goal_pick()
+            return self.generate_goal_can()
         else:
             return self.generate_goal_reach()
     
@@ -164,6 +173,8 @@ class PickPlaceGoalPick(gym.Env):
         if self.move_object:
             return np.concatenate((self.extract_can_pos_from_obs(obs), self.extract_can_to_eef_dist_from_obs(obs)))
         else:
+            x = self.extract_eef_pos_from_obs(obs)
+            y = self.extract_can_to_eef_dist_from_obs(obs)
             return np.concatenate((self.extract_eef_pos_from_obs(obs), self.extract_can_to_eef_dist_from_obs(obs)))
 
     def get_reward_fn(self):

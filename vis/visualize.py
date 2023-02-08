@@ -57,6 +57,7 @@ def visualise_her_results(path):
     epochs = df_epoch.size
     figure, axis = plt.subplots(2, 3, figsize=(15, 8))
     axis[0,0].plot(df_epoch['success_rate'] * 100, "-b")
+    axis[0,0].plot(running_average(df_epoch['success_rate'].to_numpy() * 100, n=10), '-.', color='red', label="Mean")
     axis[0,0].set_xlabel("Iteration")
     axis[0,0].set_ylabel("Success rate (eval) %")
     axis[0,0].set_title(path)

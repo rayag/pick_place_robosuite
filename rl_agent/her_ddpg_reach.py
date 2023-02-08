@@ -581,7 +581,7 @@ def main():
             checkpoint_dir=args.checkpoint,
             helper_policy_dir=args.helper_pi,
             use_demos=False,
-            descr='HER'+args.descr)
+            descr='HER-reach-'+args.descr)
         agent.train(epochs=int(args.epochs), 
             iterations_per_epoch=int(args.it_per_epoch), 
             episodes_per_iter=int(args.ep_per_it), 

@@ -7,7 +7,7 @@ DEMO_PATH = "/home/rayageorgieva/uni/masters/pick_place_robosuite/demo/low_dim.h
 
 
 class PrioritizedReplayBuffer:
-    def __init__(self, action_dim, obs_dim, capacity=int(1e6), min_priority=1e-2, alpha = 0.5, beta=0.1, eps=1e-1) -> None:
+    def __init__(self, action_dim, obs_dim, capacity=int(1e6), min_priority=1e-2, alpha = 1, beta=1, eps=1e-1) -> None:
         self.sum_tree = SumTree(size=capacity)
         self.obs = np.zeros([capacity, obs_dim], dtype=np.float32)
         self.actions = np.zeros([capacity, action_dim], dtype=np.float32)

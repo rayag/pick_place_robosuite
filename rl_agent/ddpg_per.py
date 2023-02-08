@@ -12,7 +12,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class DDPGPERAgent(DDPGAgent):
 
-    def init_replay_buffer(self, use_experience, demo_dir):
+    def init_replay_buffer(self, use_experience, demo_dir, episode_len):
         self.replay_buffer = PrioritizedReplayBuffer(obs_dim=self.obs_dim, action_dim=self.action_dim)
         self.use_experience = use_experience
         if use_experience:
