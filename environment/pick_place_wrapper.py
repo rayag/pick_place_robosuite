@@ -92,7 +92,7 @@ class PickPlaceWrapper(gym.Env):
         reach, grasp, lift, hover = self.gym_env.env.staged_rewards()
         done = False
         if self.task == Task.REACH:
-            reward = 20 * reach - 1
+            reward = 20 * reach - 1 if grasp == 0 else 1
             done = (reward == 1)
         if self.task == Task.PICK:
             if lift > 0:
