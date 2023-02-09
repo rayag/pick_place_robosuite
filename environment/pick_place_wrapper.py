@@ -69,8 +69,13 @@ class PickPlaceWrapper(gym.Env):
 
     def reset(self):
         if self.use_states:
-            i = np.random.choice(len(self.starting_states_pick))
-            return self.reset_to(self.starting_states_pick[i])
+            states = None
+            if self.task == Task.REACH:
+                states = self.starting_states_reach
+            else:
+                states = self.starting_states_pick
+            i = np.random.choice(len(states))
+            return self.reset_to(states[i])
         return self.gym_env.reset(), self.generate_goal()
 
     def reset_to(self, state):
