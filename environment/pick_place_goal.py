@@ -60,7 +60,8 @@ class PickPlaceGoalPick(gym.Env):
         return observation, desired goal
         '''
         if self.use_predefined_states:
-            states = self.starting_states_pick if self.start_from_middle else self.starting_states_reach
+            # states = self.starting_states_pick if self.start_from_middle else self.starting_states_reach
+            states = self.starting_states_pick if np.random.rand() < 0.5 else self.starting_states_reach
             state = states[np.random.choice(len(states))]
             return self.reset_to(state)
         else:
@@ -107,7 +108,7 @@ class PickPlaceGoalPick(gym.Env):
 
     def generate_goal(self):
         if self.move_object:
-            return self.generate_goal_can()
+            return self.generate_goal_pick()
         else:
             return self.generate_goal_reach()
     
@@ -173,8 +174,6 @@ class PickPlaceGoalPick(gym.Env):
         if self.move_object:
             return np.concatenate((self.extract_can_pos_from_obs(obs), self.extract_can_to_eef_dist_from_obs(obs)))
         else:
-            x = self.extract_eef_pos_from_obs(obs)
-            y = self.extract_can_to_eef_dist_from_obs(obs)
             return np.concatenate((self.extract_eef_pos_from_obs(obs), self.extract_can_to_eef_dist_from_obs(obs)))
 
     def get_reward_fn(self):
@@ -308,17 +307,16 @@ def sync_envs(env: PickPlaceGoalPick):
 
 
 def main():
-    inspect_observations(True)
-    # cfg = PICK_PLACE_DEFAULT_ENV_CFG
-    # cfg['has_renderer'] = True
-    # cfg['initialization_noise'] = 'default'
-    # env = PickPlaceGoalPick(pg=1)
-    # env.load_states_with_object_grabbed()
-    # for i in range(10):
-    #     env.reset()
-    #     env.render()
-    #     time.sleep(5)
-    #     print()
+    # inspect_observations(True)
+    cfg = PICK_PLACE_DEFAULT_ENV_CFG
+    cfg['has_renderer'] = True
+    cfg['initialization_noise'] = 'default'
+    env = PickPlaceGoalPick(cfg, move_object=True, use_predefined_states=True, start_from_middle=True)
+    for i in range(20):
+        env.reset()
+        env.render()
+        time.sleep(2)
+        print()
     
 
 if __name__ == "__main__":
