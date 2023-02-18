@@ -26,6 +26,7 @@ PICK_PLACE_DEFAULT_ENV_CFG = {
     "controller_configs": ctr_cfg,
     "pick_only": False,
     "use_states": False,
+    "start_from_middle": False,
     "initialization_noise": None,
     "render_camera": "frontview",
     'p_goal_air': 1
@@ -35,6 +36,7 @@ class Task(Enum):
     REACH = 1
     PICK = 2 # target somewhere in the air 
     PICK_AND_PLACE = 3
+    GRASP = 4
 
 
 
@@ -60,6 +62,7 @@ class PickPlaceWrapper(gym.Env):
         self.action_space = self.gym_env.action_space
         self.pick_only = env_config['pick_only']
         self.use_states = env_config['use_states']
+        self.start_from_middle = env_config['start_from_middle']
         self.task = task
         self.goal_dim = 6
         self.prob_goal_air = env_config['p_goal_air']
@@ -70,7 +73,7 @@ class PickPlaceWrapper(gym.Env):
     def reset(self):
         if self.use_states:
             states = None
-            if self.task == Task.REACH:
+            if self.task == Task.REACH or not self.start_from_middle:
                 states = self.starting_states_reach
             else:
                 states = self.starting_states_pick
@@ -94,8 +97,7 @@ class PickPlaceWrapper(gym.Env):
 
     def step(self, action):
         obs, reward, done, info = self.gym_env.step(action=action)
-        reach, grasp, lift, hover = self.gym_env.env.staged_rewards()
-        done = False
+        reach, grasp, lift, _ = self.gym_env.env.staged_rewards()
         if self.task == Task.REACH:
             reward = 20 * reach - 1 if grasp == 0 else 1
             done = (reward == 1)
@@ -107,10 +109,13 @@ class PickPlaceWrapper(gym.Env):
             else:
                 reward = reach
         # for PICK_AND_PLACE the reward is the original one
-        return obs, reward, done, info, self.get_achieved_goal_from_obs(obs)
+        return obs, reward, reward == 1, info, self.get_achieved_goal_from_obs(obs)
+
+    def reward(self):
+        return self.gym_env.env.reward()
 
     def load_starting_states_for_pick(self):
-        if not self.use_states or self.task == Task.REACH:
+        if (not self.use_states):
             return
         path = os.path.join("./data/finished_reach/", f"data{MPI.COMM_WORLD.Get_rank()}.hdf5")
         with h5py.File(path, "r+") as g:
@@ -124,6 +129,8 @@ class PickPlaceWrapper(gym.Env):
             self.starting_states_pick = states_np
     
     def load_starting_states_for_reach(self):
+        if (not self.use_states):
+            return
         path = os.path.join("./data/successful_reach/", f"data{MPI.COMM_WORLD.Get_rank()}.hdf5")
         with h5py.File(path, "r+") as g:
             states = list(g["states"].keys())
@@ -150,10 +157,10 @@ class PickPlaceWrapper(gym.Env):
         y_range = rs_env.bin_size[1] / 4.0
         target_x = rs_env.target_bin_placements[CAN_IDX][0]
         target_y = rs_env.target_bin_placements[CAN_IDX][1]
-        target_z = rs_env.target_bin_placements[CAN_IDX][2]
+        target_z = 1 # somewhere in the air
         x = target_x #np.random.uniform(low=target_x-x_range, high=target_x+x_range)
         y = target_y #np.random.uniform(low=target_y-y_range, high=target_y+y_range)
-        return np.array([x,y,1,0,0,0])
+        return np.array([x,y,target_z,0,0,0])
 
     def generate_goal_pick(self):
         # the goal is somewhere around the current position of the can
@@ -202,9 +209,7 @@ class PickPlaceWrapper(gym.Env):
 
     @staticmethod
     def calc_reward_reach_sparse(achieved_goal, desired_goal):
-        # achieved_gripper_pos = achieved_goal[:3]
-        # desired_gripper_pos = desired_goal[:3]
-        goal_reached = np.linalg.norm(achieved_goal[3:] - desired_goal[3:], axis=-1) < 0.01
+        goal_reached = np.linalg.norm(achieved_goal[3:] - desired_goal[3:], axis=-1) < 0.005
         return 0 if goal_reached else -1
 
     def get_reward_fn(self):
