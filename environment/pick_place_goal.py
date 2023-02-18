@@ -1,5 +1,5 @@
 from environment.pick_place_can_grabbed import PickPlaceGrabbedCan
-from environment.pick_place_wrapper import PickPlaceWrapper, PICK_PLACE_DEFAULT_ENV_CFG
+from environment.pick_place_wrapper import PickPlaceWrapper, PICK_PLACE_DEFAULT_ENV_CFG, Task
 from replay_buffer.simple_replay_buffer import SimpleReplayBuffer
 import gym
 import h5py
@@ -24,7 +24,7 @@ def get_states_grabbed_can():
 class PickPlaceGoalPick(gym.Env):
     def __init__(self, env_config=PICK_PLACE_DEFAULT_ENV_CFG, seed=None, prob_goal_air=1, move_object=True, use_predefined_states=True, start_from_middle=False, dense_reward=False) -> None:
         super().__init__()
-        self.env_wrapper = PickPlaceWrapper(env_config=env_config)
+        self.env_wrapper = PickPlaceWrapper(env_config=env_config, task=Task.PICK_AND_PLACE)
         self.env_wrapper.gym_env.seed(seed)
         self.move_object = move_object
         self.discard_gripper = not move_object
@@ -39,6 +39,7 @@ class PickPlaceGoalPick(gym.Env):
         self.start_from_middle = start_from_middle
         self.load_starting_states_for_reach()
         self.load_starting_states_for_pick()
+        self.i = 0
 
     def load_states_with_object_grabbed(self):
         self.states_grabbed_can = get_states_grabbed_can()
@@ -53,16 +54,23 @@ class PickPlaceGoalPick(gym.Env):
         if self.discard_gripper:
             action[-1] = -1 # keep open
         obs, _, done, info, _ = self.env_wrapper.step(action)
-        return obs, self.get_achieved_goal_from_obs(obs)
+        return obs, self.get_achieved_goal_from_obs(obs), done 
 
     def reset(self):
         '''
         return observation, desired goal
         '''
         if self.use_predefined_states:
-            # states = self.starting_states_pick if self.start_from_middle else self.starting_states_reach
-            states = self.starting_states_pick if np.random.rand() < 0.5 else self.starting_states_reach
-            state = states[np.random.choice(len(states))]
+            states = self.starting_states_pick if self.start_from_middle else self.starting_states_reach
+            arr = [186, 8247, 8293, 3038, 7711, 476, 3596, 714, 6652, 4132, 2709, 0]
+            i = arr[self.i % len(arr)]
+            self.i += 1
+            if self.i > len(arr):
+                i = np.random.choice(len(states))
+            # i = np.random.choice(len(states))
+            # print(i)
+            # states = self.starting_states_pick if np.random.rand() < 0.5 else self.starting_states_reach
+            state = states[i]
             return self.reset_to(state)
         else:
             obs, _ = self.env_wrapper.reset()
@@ -86,14 +94,14 @@ class PickPlaceGoalPick(gym.Env):
         self.goal = self.generate_goal()
         return obs, self.goal
     
-    def generate_goal_can(self):
-        CAN_IDX = 3 # TODO: make this work for all objects
+    def generate_goal_pick_place(self):
+        BIN_IDX = 0
         rs_env = self.env_wrapper.gym_env.env
-        x_range = rs_env.bin_size[0] / 4.0
-        y_range = rs_env.bin_size[1] / 4.0
-        target_x = rs_env.target_bin_placements[CAN_IDX][0]
-        target_y = rs_env.target_bin_placements[CAN_IDX][1]
-        target_z = rs_env.target_bin_placements[CAN_IDX][2]
+        x_range = rs_env.bin_size[0] / 8.0
+        y_range = rs_env.bin_size[1] / 8.0
+        target_x = rs_env.target_bin_placements[BIN_IDX][0]
+        target_y = rs_env.target_bin_placements[BIN_IDX][1]
+        target_z = rs_env.target_bin_placements[BIN_IDX][2]
         x = target_x #np.random.uniform(low=target_x-x_range, high=target_x+x_range)
         y = target_y #np.random.uniform(low=target_y-y_range, high=target_y+y_range)
         return np.array([x,y,1,0,0,0])
@@ -108,7 +116,7 @@ class PickPlaceGoalPick(gym.Env):
 
     def generate_goal(self):
         if self.move_object:
-            return self.generate_goal_pick()
+            return self.generate_goal_pick_place()
         else:
             return self.generate_goal_reach()
     

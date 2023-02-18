@@ -1,8 +1,9 @@
-from environment.pick_place_goal import PickPlaceGoalPick, sync_envs
-from environment.pick_place_wrapper import PICK_PLACE_DEFAULT_ENV_CFG
+from environment.pick_place_wrapper import PICK_PLACE_DEFAULT_ENV_CFG, Task, PickPlaceWrapper
 from logger.logger import ProgressLogger
 from replay_buffer.her_replay_buffer import HERReplayBuffer
 from replay_buffer.normalizer import Normalizer
+from networks.actor import ActorNetwork, ActorNetworkLowDim
+from networks.critic import CriticNetwork, CriticNetworkLowDim
 
 from mpi4py import MPI
 from torch import nn
@@ -18,97 +19,10 @@ import threading
 import h5py
 import git
 
-device = 'cpu'#torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-class ActorNetwork(nn.Module): 
-    def __init__(self, obs_dim, action_dim, action_high = 1.0, action_low = 0.0) -> None:
-        super(ActorNetwork, self).__init__()
-        self.action_high = torch.FloatTensor(action_high).to(device)
-        self.action_low = torch.FloatTensor(action_low).to(device)
-        self.input = nn.Linear(obs_dim, 256).to(device) #TODO: allow custom layer sizes
-        self.h1 = nn.Linear(256, 256).to(device)
-        self.h2 = nn.Linear(256, 256).to(device)
-        self.h3 = nn.Linear(256, 256).to(device)
-        self.output = nn.Linear(256, action_dim).to(device)
-
-    def forward(self, obs):
-        x = F.relu(self.input(obs))
-        x = F.relu(self.h1(x))
-        x = F.relu(self.h2(x))
-        x = F.relu(self.h3(x))
-        action = torch.tanh(self.output(x)) * self.action_high
-        return action
-
-class ActorNetworkLowDim(nn.Module): 
-    def __init__(self, obs_dim, action_dim, action_high = 1.0, action_low = 0.0) -> None:
-        super(ActorNetworkLowDim, self).__init__()
-        self.action_dim = action_dim
-        self.action_low_dim = 3
-        self.action_high = torch.FloatTensor(np.full(shape=(self.action_low_dim), fill_value=1)).to(device)
-        self.action_low = torch.FloatTensor(np.full(shape=(self.action_low_dim), fill_value=-1)).to(device)
-        self.input = nn.Linear(obs_dim, 256).to(device) #TODO: allow custom layer sizes
-        self.h1 = nn.Linear(256, 256).to(device)
-        self.h2 = nn.Linear(256, 256).to(device)
-        self.h3 = nn.Linear(256, 256).to(device)
-        self.output = nn.Linear(256, self.action_low_dim).to(device)
-
-    def forward(self, obs):
-        x = F.relu(self.input(obs))
-        x = F.relu(self.h1(x))
-        x = F.relu(self.h2(x))
-        x = F.relu(self.h3(x))
-        action = torch.tanh(self.output(x)) * self.action_high
-        if len(action.size())==1:
-            action_full = torch.zeros(self.action_dim)
-            action_full[:3] = action[:3]
-            action_full[-1] = action[-1]
-        if len(action.size()) == 2:
-            action_full = torch.zeros(action.size()[0], self.action_dim)
-            action_full[:,:3] = action[:,:3]
-            action_full[:,-1] = action[:,-1]
-        return action_full
-
-class CriticNetwork(nn.Module):
-    def __init__(self, obs_dim, action_dim, goal_dim) -> None:
-        super().__init__()
-        self.input = nn.Linear(obs_dim + goal_dim + action_dim, 256).to(device)
-        self.h1 = nn.Linear(256, 256).to(device)
-        self.h2 = nn.Linear(256, 256).to(device)
-        self.h3 = nn.Linear(256, 256).to(device)
-        self.output = nn.Linear(256, 1).to(device)
-
-    def forward(self, sg, a):
-        x = F.relu(self.input(torch.cat([sg, a], 1)))
-        x = F.relu(self.h1(x))
-        x = F.relu(self.h2(x))
-        x = F.relu(self.h3(x))
-        out = self.output(x)
-        return out
-
-class CriticNetworkLowDim(nn.Module):
-    def __init__(self, obs_dim, action_dim, goal_dim) -> None:
-        super().__init__()
-        self.low_dim = 3
-        self.input = nn.Linear(obs_dim + goal_dim + self.low_dim, 256).to(device)
-        self.h1 = nn.Linear(256, 256).to(device)
-        self.h2 = nn.Linear(256, 256).to(device)
-        self.h3 = nn.Linear(256, 256).to(device)
-        self.output = nn.Linear(256, 1).to(device)
-
-    def forward(self, sg, a):
-        if len(a.size()) == 1:
-            a = a[:self.low_dim]
-        elif len(a.size()) == 2:
-            a = a[:, :self.low_dim]
-        x = F.relu(self.input(torch.cat([sg, a], 1)))
-        x = F.relu(self.h1(x))
-        x = F.relu(self.h2(x))
-        x = F.relu(self.h3(x))
-        out = self.output(x)
-        return out
+device = 'cpu' # Workers work better when only on CPU
 
 class DDPGHERAgent:
-    def __init__(self, env, env_cfg: any,  obs_dim: int, action_dim: int, goal_dim: int, 
+    def __init__(self, env: PickPlaceWrapper, env_cfg: any,  obs_dim: int, action_dim: int, goal_dim: int, 
         episode_len: int=200, update_iterations: int=4, batch_size: int=256, actor_lr :float=1e-3, 
         critic_lr: float = 1e-3, input_clip_range: float=5, descr: str='', results_dir: str='./results', 
         normalize_data: bool=True, checkpoint_dir: str=None, use_demos=False,
@@ -203,10 +117,12 @@ class DDPGHERAgent:
             t = 0
             done = False
             ep_return = 0
+            env_ep_return = 0
+
             if self.helper_policy is not None:
-                obs, first_policy_done = self._run_helper_policy_till_completion(obs, True)
+                obs, first_policy_done = self._run_reach_policy_till_completion(obs, True)
                 print(f'Reach done: {first_policy_done}')
-                time.sleep(1)
+
             while not done and t < steps:
                 obs_norm = np.squeeze(self.obs_normalizer.normalize(obs))
                 goal_norm = np.squeeze(self.goal_normalizer.normalize(goal))
@@ -214,55 +130,48 @@ class DDPGHERAgent:
                 action = self.actor(obs_goal_norm_torch)
                 action_dateched = action.cpu().detach().numpy()\
                     .clip(self.env.actions_low, self.env.actions_high)
-                next_obs, achieved_goal = self.env.step(action_dateched)
+                next_obs, env_reward, env_done, _, achieved_goal = self.env.step(action_dateched)
                 reward = self.reward_fn(achieved_goal, goal)
                 done = (reward == 0)
                 obs = next_obs
                 t += 1
                 ep_return += reward
+                env_ep_return += env_reward
                 self.env.render()
-            print(f"Episode {ep}: return {ep_return} done {done}")
 
-    def _run_helper_policy_till_completion(self, obs, render=False):
+            print(f"Episode {ep}: return {ep_return} env_return {env_ep_return} done {done} env_done {env_done}")
+
+    def _run_reach_policy_till_completion(self, obs, render=False):
+        # running the reach task
         done = False
         goal = self.env.generate_goal_reach()
-        move_object = self.env.move_object
+        original_task = self.env.task
+        self.env.set_task(Task.REACH)
         self.env.use_predefined_states = True
-        self.env.move_object = False
+        done_cnt = 3
         t = 0
-        while not done and t < self.helper_T:
+        while done_cnt > 0 and t < self.helper_T:
             obs_norm = np.squeeze(self.helper_obs_norm.normalize(obs))
             goal_norm = np.squeeze(self.helper_goal_norm.normalize(goal))
             obs_goal_norm_torch = torch.FloatTensor(np.concatenate((obs_norm, goal_norm))).to(device)
             action = self.helper_policy(obs_goal_norm_torch)
             action_detached = action.cpu().detach().numpy()\
                 .clip(self.env.actions_low, self.env.actions_high)
-            next_obs, achieved_goal = self.env.step(action_detached)
+            next_obs, _,_,_, achieved_goal = self.env.step(action_detached)
             done = self.env.calc_reward_reach_sparse(achieved_goal, goal) == 0
             if not done:
                 goal[:3] = self.env.extract_can_pos_from_obs(next_obs)+ np.random.uniform(0.001, 0.003)
+                done_cnt = 3
+            else:
+                done_cnt -= 1
             obs = next_obs
             t += 1
             if render:
                 self.env.render()
-        self.env.move_object = move_object
+        self.env.set_task(original_task)
         return obs, done
 
     def train(self, epochs=200, iterations_per_epoch=100, episodes_per_iter=1000, exploration_eps=0.1, future_goals = 4):
-        if self.use_demonstrations:
-            if MPI.COMM_WORLD.Get_rank() == 0:
-                print(f"Loading demonstration data...")
-                self.replay_buffer.load_demonstrations(self.env, self.episode_len)
-                self.obs_normalizer.sync_stats(single_worker=True)
-                self.goal_normalizer.sync_stats(single_worker=True)
-                for _ in range(10):
-                    self.update(single_worker=True)
-                print("Demonstrations loaded")
-            self._sync_network_parameters(self.actor)
-            self._sync_network_parameters(self.actor_target)
-            self._sync_network_parameters(self.critic)
-            self._sync_network_parameters(self.critic_target)
-
         exploration_eps_decay = 0.98
         for epoch in range(epochs):
             if MPI.COMM_WORLD.Get_rank() == 0:
@@ -279,7 +188,7 @@ class DDPGHERAgent:
                     obs, goal = self.env.reset()
                     if self.helper_policy is not None:
                         if np.random.rand() < 0.5:
-                            obs, helper_done = self._run_helper_policy_till_completion(obs)
+                            obs, helper_done = self._run_reach_policy_till_completion(obs)
                             helper_cnt += 1
                             if helper_done:
                                 helper_success += 1
@@ -392,13 +301,14 @@ class DDPGHERAgent:
 
     def _evaluate(self, episodes=10, render=False):
         successful_episodes = 0
+        env_successful_episodes = 0
         print(f"{MPI.COMM_WORLD.Get_rank()} Start eval")
         for ep in range(episodes):
             obs, goal = self.env.reset()
             while self.reward_fn(self.env.get_achieved_goal_from_obs(obs), goal) == 0:
                 obs, goal = self.env.reset() # sample goal until it is not initially satisfied
             if self.helper_policy is not None:
-                obs, _ = self._run_helper_policy_till_completion(obs, render)
+                obs, _ = self._run_reach_policy_till_completion(obs, render)
             t = 0
             done = False
             ep_return = 0
@@ -410,11 +320,9 @@ class DDPGHERAgent:
                 action = self.actor(obs_goal_norm_torch)
                 action_dateched = action.cpu().detach().numpy()\
                     .clip(self.env.actions_low, self.env.actions_high)
-                next_obs, achieved_goal = self.env.step(action_dateched)
+                next_obs, env_reward, env_done, _, achieved_goal = self.env.step(action_dateched)
                 reward = self.reward_fn(achieved_goal, goal)
                 done = (reward == 0)
-                # if np.linalg.norm(original_can_pos - self.env.extract_can_pos_from_obs(next_obs)) > 0.002 and not done:
-                #     goal[:3] = self.env.extract_can_pos_from_obs(next_obs) + np.random.uniform(low=0.001, high=0.003)
                 obs = next_obs
                 t += 1
                 ep_return += reward
@@ -422,8 +330,10 @@ class DDPGHERAgent:
                     self.env.render()
             if done:
                 successful_episodes += 1
+            if env_done:
+                env_successful_episodes += 1
         local_success_rate = successful_episodes / episodes
-        print(f"{MPI.COMM_WORLD.Get_rank()} success rate {local_success_rate}")
+        print(f"{MPI.COMM_WORLD.Get_rank()} success rate {local_success_rate} env success rate {env_successful_episodes / episodes}")
         global_success_rate = MPI.COMM_WORLD.allreduce(local_success_rate, op=MPI.SUM)
         global_success_rate /= MPI.COMM_WORLD.Get_size()
         return global_success_rate
@@ -448,10 +358,13 @@ class DDPGHERAgent:
     def _load_from(self, path):
         if os.path.exists(path):
             print(f"Loading from {path} device {device}")
+            # load main networks
             self.actor.load_state_dict(torch.load(os.path.join(path, 'actor_weights.pth'), map_location=device))
             self.critic.load_state_dict(torch.load(os.path.join(path, 'critic_weights.pth'), map_location=device))
+            # load targets
             self.actor_target.load_state_dict(torch.load(os.path.join(path, 'actor_target_weights.pth'), map_location=device))
             self.critic_target.load_state_dict(torch.load(os.path.join(path, 'critic_target_weights.pth'), map_location=device))
+            # load normalizers data
             if os.path.exists(os.path.join(path, 'normalizer_data.h5')):
                 with h5py.File(os.path.join(path, 'normalizer_data.h5'), 'r') as f:
                     print(f['obs_norm_mean'])
@@ -539,36 +452,35 @@ def main():
     parser.add_argument('-alr', '--actor-lr', default=1e-3)
     parser.add_argument('-clr', '--critic-lr', default=1e-3)
     parser.add_argument('--epochs', default=1000, type=int)
-    parser.add_argument('--it_per_epoch', default=50, type=int)
-    parser.add_argument('--ep_per_it', default=16)
-    parser.add_argument('--exp_eps', default=0, type=float)
-    parser.add_argument('--normalize', action='store_true', default=False)
-    parser.add_argument('--update_it', default=40)
-    parser.add_argument('--k', default=4)
-    parser.add_argument('--horizon', type=int, default=150)
+    parser.add_argument('--it_per_epoch', default=50, type=int, help="Number of iterations per epoch")
+    parser.add_argument('--ep_per_it', default=16, help="Number of episodes per iteration")
+    parser.add_argument('--exp_eps', default=0, type=float, help="Exploration epsilon")
+    parser.add_argument('--normalize', action='store_true', default=False, help="If set, data will be normalized")
+    parser.add_argument('--update_it', default=40, help="Number of update iterations per epoch")
+    parser.add_argument('--k', default=4, help="k parameter of HER")
+    parser.add_argument('--horizon', type=int, default=150, help="Timesteps included in one episode")
     parser.add_argument('--seed', default=59, help="Random seed")
-    parser.add_argument('--move_object', default=False, action='store_true')
-    parser.add_argument('--use_states', default=False, action='store_true')
-    parser.add_argument('--start_from_middle', default=False, action='store_true')
+    parser.add_argument('--use_states', default=False, action='store_true', help="If true, the agent uses predefined states")
+    parser.add_argument('--start_from_middle', default=False, action='store_true', help="For pick_and_place agent, if true, starts episodes with already picked object")
     parser.add_argument('-a', '--action', choices=['train', 'rollout'], default='train')
-    parser.add_argument('--helper_pi', type=str, help="Path to helper policy")
-    parser.add_argument('--dense_reward', action='store_true', default=False)
-    parser.add_argument('--descr', type=str, default="")
+    parser.add_argument('-t', '--task', type=str, choices=['reach', 'pick', 'pick_and_place'])
+    parser.add_argument('--reach_pi', type=str, help="Path to saved reach agent")
+    parser.add_argument('--dense_reward', action='store_true', default=False, help="if set, we use dense reward")
+    parser.add_argument('--descr', type=str, default="", help="Description, appended to the directory name")
     args = parser.parse_args()
-    print(f"Actor alpha {args.actor_lr}, Critic alpha {args.critic_lr} Normalize {args.normalize} Move object {args.move_object} Helper policy {args.helper_pi}")
+    print(f"Actor alpha {args.actor_lr}, Critic alpha {args.critic_lr} Normalize {args.normalize} Task {args.task} Helper policy {args.reach_pi}")
 
     env_cfg = PICK_PLACE_DEFAULT_ENV_CFG
     env_cfg['pick_only'] = True
     env_cfg['horizon'] = 150
     env_cfg['initialization_noise'] = None
+    env_cfg['use_states'] = args.use_states
+    env_cfg['dense_reward'] = args.dense_reward
+    env_cfg['start_from_middle'] = args.start_from_middle
     
     if args.action == 'train':
-        env = PickPlaceGoalPick(env_config=env_cfg, 
-            prob_goal_air=1, 
-            move_object=args.move_object, 
-            use_predefined_states=args.use_states, 
-            start_from_middle=args.start_from_middle, 
-            dense_reward=args.dense_reward)
+        env = PickPlaceWrapper(env_config=env_cfg, 
+            task=Task[args.task.upper()])
         set_random_seeds(args.seed, env)
         agent = DDPGHERAgent(env=env, env_cfg=env_cfg, obs_dim=env.obs_dim, 
             episode_len=args.horizon,
@@ -580,10 +492,9 @@ def main():
             normalize_data=args.normalize,
             update_iterations=int(args.update_it),
             checkpoint_dir=args.checkpoint,
-            helper_policy_dir=args.helper_pi,
+            helper_policy_dir=args.reach_pi,
             use_demos=False,
             descr='HER'+args.descr)
-        agent._evaluate(20)
         agent.train(epochs=int(args.epochs), 
             iterations_per_epoch=int(args.it_per_epoch), 
             episodes_per_iter=int(args.ep_per_it), 
@@ -592,13 +503,8 @@ def main():
         
     elif args.action == 'rollout':
         env_cfg['has_renderer'] = True
-        env = PickPlaceGoalPick(env_config=env_cfg, 
-            prob_goal_air=1, 
-            move_object=args.move_object, 
-            use_predefined_states=args.use_states, 
-            start_from_middle=args.start_from_middle, 
-            dense_reward=args.dense_reward)
-        # set_random_seeds(args.seed, env)
+        env = PickPlaceWrapper(env_config=env_cfg, 
+                task=Task[args.task.upper()])
         agent = DDPGHERAgent(env=env, env_cfg=env_cfg, obs_dim=env.obs_dim, 
             episode_len=args.horizon,
             action_dim=env.action_dim, 
@@ -609,7 +515,7 @@ def main():
             normalize_data=args.normalize,
             update_iterations=int(args.update_it),
             checkpoint_dir=args.checkpoint,
-            helper_policy_dir=args.helper_pi,
+            helper_policy_dir=args.reach_pi,
             descr='ROLLOUT')
         agent.rollout(episodes=20, steps=args.horizon)
 

@@ -82,7 +82,7 @@ def rollout_helper(cfg: GlobalConfig):
         checkpoint_dir=cfg.checkpoint_dir)
     for _ in range(10):
         obs, _ = env.reset()
-        obs, _ = her_agent._run_helper_policy_till_completion(obs, True)    
+        obs, _ = her_agent._run_reach_policy_till_completion(obs, True)    
         agent.rollout_goal_env(env=env, obs=obs, steps=20)
 
 def evalueate(cfg: GlobalConfig):
