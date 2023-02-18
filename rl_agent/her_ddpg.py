@@ -221,7 +221,7 @@ class DDPGHERAgent:
                             action = self.actor(obs_goal_norm_torch)
                             action_detached = (action.cpu().detach().numpy()+np.random.normal(scale=0.1, size=self.action_dim))\
                                 .clip(self.env.actions_low, self.env.actions_high)
-                        next_obs, achieved_goal = self.env.step(action_detached)
+                        next_obs, _, _, _, achieved_goal = self.env.step(action_detached)
                         reward = self.reward_fn(achieved_goal, goal)
                         if not success and reward == 0.0:
                             iteration_success_count += 1
