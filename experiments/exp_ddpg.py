@@ -1,7 +1,6 @@
 from environment.pick_place_wrapper import PickPlaceWrapper, PICK_PLACE_DEFAULT_ENV_CFG, Task
-from environment.pick_place_goal import PickPlaceGoalPick
 from rl_agent.ddpg import DDPGAgent
-from rl_agent.her_ddpg_new import DDPGHERAgent
+from rl_agent.her_ddpg import DDPGHERAgent
 from config.global_config import GlobalConfig
 
 def run_ddpg_experiment(cfg: GlobalConfig):

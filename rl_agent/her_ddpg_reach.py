@@ -18,6 +18,8 @@ import threading
 import h5py
 import git
 
+# TODO: this is currently unusable!!! Fix it
+
 device = 'cpu'#torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class ActorNetwork(nn.Module): 
