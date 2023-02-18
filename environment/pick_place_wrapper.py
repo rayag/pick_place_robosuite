@@ -117,7 +117,7 @@ class PickPlaceWrapper(gym.Env):
     def load_starting_states_for_pick(self):
         if (not self.use_states):
             return
-        path = os.path.join("./data/finished_reach/", f"data{MPI.COMM_WORLD.Get_rank()}.hdf5")
+        path = os.path.join("./data/states_pick/", f"data{MPI.COMM_WORLD.Get_rank()}.hdf5")
         with h5py.File(path, "r+") as g:
             states = list(g["states"].keys())
             assert len(states) > 0
@@ -131,7 +131,7 @@ class PickPlaceWrapper(gym.Env):
     def load_starting_states_for_reach(self):
         if (not self.use_states):
             return
-        path = os.path.join("./data/successful_reach/", f"data{MPI.COMM_WORLD.Get_rank()}.hdf5")
+        path = os.path.join("./data/states_reach/", f"data{MPI.COMM_WORLD.Get_rank()}.hdf5")
         with h5py.File(path, "r+") as g:
             states = list(g["states"].keys())
             assert len(states) > 0
