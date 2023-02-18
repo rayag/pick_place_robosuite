@@ -123,7 +123,8 @@ class DDPGHERAgent:
                 obs, first_policy_done = self._run_reach_policy_till_completion(obs, True)
                 print(f'Reach done: {first_policy_done}')
 
-            while not done and t < steps:
+            original_can_pos = self.env.extract_can_pos_from_obs(obs)
+            while t < steps:
                 obs_norm = np.squeeze(self.obs_normalizer.normalize(obs))
                 goal_norm = np.squeeze(self.goal_normalizer.normalize(goal))
                 obs_goal_norm_torch = torch.FloatTensor(np.concatenate((obs_norm, goal_norm))).to(device)
@@ -133,6 +134,10 @@ class DDPGHERAgent:
                 next_obs, env_reward, env_done, _, achieved_goal = self.env.step(action_dateched)
                 reward = self.reward_fn(achieved_goal, goal)
                 done = (reward == 0)
+                if self.env.task == Task.REACH:
+                    if np.linalg.norm(original_can_pos - self.env.extract_can_pos_from_obs(next_obs)) > 0.002 and not done:
+                        goal[:3] = self.env.extract_can_pos_from_obs(next_obs) + np.random.uniform(low=0.001, high=0.003)
+                        original_can_pos = goal[:3]
                 obs = next_obs
                 t += 1
                 ep_return += reward
