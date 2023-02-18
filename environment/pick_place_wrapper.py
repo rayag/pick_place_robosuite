@@ -247,3 +247,19 @@ class PickPlaceWrapper(gym.Env):
     def actions_low(self):
         return self.action_space.low
 
+    def run_random_actions(self, episode_len = 100):
+        self.reset()
+        for _ in range(episode_len):
+            action = np.random.uniform(-1, 1, size=self.action_dim)
+            self.step(action)
+            self.render()
+
+
+def main():
+    env_cfg = PICK_PLACE_DEFAULT_ENV_CFG.copy()
+    env_cfg['has_renderer'] = True
+    env = PickPlaceWrapper(env_cfg)
+    env.run_random_actions()
+
+if __name__ == '__main__':
+    main()
