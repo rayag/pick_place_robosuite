@@ -507,7 +507,7 @@ def main():
             future_goals=int(args.k))
         
     elif args.action == 'rollout':
-        env_cfg['has_renderer'] = True
+        # env_cfg['has_renderer'] = True
         env = PickPlaceWrapper(env_config=env_cfg, 
                 task=Task[args.task.upper()])
         agent = DDPGHERAgent(env=env, env_cfg=env_cfg, obs_dim=env.obs_dim, 
@@ -522,7 +522,8 @@ def main():
             checkpoint_dir=args.checkpoint,
             helper_policy_dir=args.reach_pi,
             descr='ROLLOUT')
-        agent.rollout(episodes=20, steps=args.horizon)
+        # agent.rollout(episodes=20, steps=args.horizon)
+        agent._evaluate(episodes=100)
 
 if __name__ == '__main__':
     main()
