@@ -6,7 +6,7 @@ import time
 import os
 import pandas as pd
 
-from environment.pick_place_wrapper import PickPlaceWrapper, PICK_PLACE_DEFAULT_ENV_CFG
+from environment.pick_place_wrapper import PickPlaceWrapper, PICK_PLACE_DEFAULT_ENV_CFG, Task
 from replay_buffer.normalizer import Normalizer
 
 DEMO_PATH = "/home/rayageorgieva/uni/masters/pick_place_robosuite/demo/low_dim.hdf5"
@@ -117,6 +117,41 @@ def inspect_env_data(visualize = False):
         ax.axvline(observations[:, index].mean(), color='#21618C', linestyle='dashed', linewidth=1)
         plt.show()
 
+def explore_demos_steps():
+    with h5py.File(DEMO_PATH, "r+") as f:
+        demos = list(f['data'].keys())
+        sum_steps = 0
+        total_steps = 0
+        for i in range(len(demos)):
+            ep = demos[i]
+            total_steps += len(f["data/{}/actions".format(ep)][()])
+        print(f"Total steps {total_steps} Average steps per episode {total_steps / len(demos)}")
+
+def explore_demos_rewards(horizon = 500):
+    env_cfg = PICK_PLACE_DEFAULT_ENV_CFG
+    env = PickPlaceWrapper(task=Task.PICK_AND_PLACE)
+    with h5py.File(DEMO_PATH, "r+") as f:
+        demos = list(f['data'].keys())
+        total_returns = 0
+        total_dones = 0
+        for i in range(len(demos)):
+            ep = demos[i]
+            actions = f["data/{}/actions".format(ep)][()]
+            state = f["data/{}/states".format(ep)][()][0]
+            env.reset_to(state)
+            ep_return = 0
+
+            for t in range(horizon):
+                if t < len(actions):
+                    act = actions[t]
+                else:
+                    act = np.zeros_like(actions[0])
+                _, reward, done, _, _ = env.step(act)
+                ep_return += reward
+            total_returns += ep_return
+            total_dones += 1
+        print(f"Average retrun per episode {total_returns / len(demos)} success rate {total_dones / len(demos)}")
+
 def plot():
     env_cfg = PICK_PLACE_DEFAULT_ENV_CFG
     env_cfg['has_renderer'] = True
@@ -172,7 +207,8 @@ def vis_initial_pos():
 
 def main():
     # vis_initial_pos()
-    inspect_env_data()
+    # inspect_env_data()
+    explore_demos_rewards()
 
 if __name__ == "__main__":
     main()

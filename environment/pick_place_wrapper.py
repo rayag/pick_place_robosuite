@@ -151,7 +151,7 @@ class PickPlaceWrapper(gym.Env):
             return self.generate_goal_pick_and_place()
 
     def generate_goal_pick_and_place(self):
-        CAN_IDX = 3 # TODO: make this work for all objects
+        CAN_IDX = 2 # TODO: make this work for all objects
         rs_env = self.gym_env.env
         x_range = rs_env.bin_size[0] / 4.0
         y_range = rs_env.bin_size[1] / 4.0

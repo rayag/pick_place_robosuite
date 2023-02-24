@@ -77,6 +77,7 @@ class DDPGHERAgent:
             self._sync_normalizer_parameters(self.helper_obs_norm)
             self._sync_normalizer_parameters(self.helper_goal_norm)
             self._sync_network_parameters(self.helper_policy)
+            print("Loaded the reach policy")
             self.helper_T = helper_T
         else:
             self.helper_policy = None
@@ -120,7 +121,7 @@ class DDPGHERAgent:
             env_ep_return = 0
 
             if self.helper_policy is not None:
-                obs, first_policy_done = self._run_reach_policy_till_completion(obs, True)
+                obs, first_policy_done, _ = self._run_reach_policy_till_completion(obs, True)
                 print(f'Reach done: {first_policy_done}')
 
             original_can_pos = self.env.extract_can_pos_from_obs(obs)
@@ -150,11 +151,13 @@ class DDPGHERAgent:
         # running the reach task
         done = False
         goal = self.env.generate_goal_reach()
+        print(f"Reach goal {goal}")
         original_task = self.env.task
         self.env.set_task(Task.REACH)
         self.env.use_predefined_states = True
         done_cnt = 3
         t = 0
+        original_can_pos = self.env.extract_can_pos_from_obs(obs)
         while done_cnt > 0 and t < self.helper_T:
             obs_norm = np.squeeze(self.helper_obs_norm.normalize(obs))
             goal_norm = np.squeeze(self.helper_goal_norm.normalize(goal))
@@ -164,7 +167,7 @@ class DDPGHERAgent:
                 .clip(self.env.actions_low, self.env.actions_high)
             next_obs, _,_,_, achieved_goal = self.env.step(action_detached)
             done = self.env.calc_reward_reach_sparse(achieved_goal, goal) == 0
-            if not done:
+            if np.linalg.norm(original_can_pos - self.env.extract_can_pos_from_obs(next_obs)) > 0.002 and not done:
                 goal[:3] = self.env.extract_can_pos_from_obs(next_obs)+ np.random.uniform(0.001, 0.003)
                 done_cnt = 3
             else:
@@ -174,7 +177,8 @@ class DDPGHERAgent:
             if render:
                 self.env.render()
         self.env.set_task(original_task)
-        return obs, done
+        print("blah")
+        return obs, done, t
 
     def train(self, epochs=200, iterations_per_epoch=100, episodes_per_iter=1000, exploration_eps=0.1, future_goals = 4):
         exploration_eps_decay = 0.98
@@ -193,7 +197,7 @@ class DDPGHERAgent:
                     obs, goal = self.env.reset()
                     if self.helper_policy is not None:
                         if np.random.rand() < 0.5:
-                            obs, helper_done = self._run_reach_policy_till_completion(obs)
+                            obs, helper_done, _ = self._run_reach_policy_till_completion(obs)
                             helper_cnt += 1
                             if helper_done:
                                 helper_success += 1
@@ -308,17 +312,18 @@ class DDPGHERAgent:
         successful_episodes = 0
         env_successful_episodes = 0
         print(f"{MPI.COMM_WORLD.Get_rank()} Start eval")
+        total_env_return = 0
         for ep in range(episodes):
             obs, goal = self.env.reset()
             while self.reward_fn(self.env.get_achieved_goal_from_obs(obs), goal) == 0:
                 obs, goal = self.env.reset() # sample goal until it is not initially satisfied
             if self.helper_policy is not None:
-                obs, _ = self._run_reach_policy_till_completion(obs, render)
+                obs, _, reach_timesteps = self._run_reach_policy_till_completion(obs, render)
             t = 0
             done = False
             ep_return = 0
-            original_can_pos = self.env.extract_can_pos_from_obs(obs)
-            while not done and t < self.episode_len:
+            pick_timesteps = self.episode_len - reach_timesteps
+            while t < pick_timesteps:
                 obs_norm = np.squeeze(self.obs_normalizer.normalize(obs))
                 goal_norm = np.squeeze(self.goal_normalizer.normalize(goal))
                 obs_goal_norm_torch = torch.FloatTensor(np.concatenate((obs_norm, goal_norm))).to(device)
@@ -331,6 +336,7 @@ class DDPGHERAgent:
                 obs = next_obs
                 t += 1
                 ep_return += reward
+                total_env_return += env_reward
                 if render:
                     self.env.render()
             if done:
@@ -339,6 +345,7 @@ class DDPGHERAgent:
                 env_successful_episodes += 1
         local_success_rate = successful_episodes / episodes
         print(f"{MPI.COMM_WORLD.Get_rank()} success rate {local_success_rate} env success rate {env_successful_episodes / episodes}")
+        print(f"env return AVG {total_env_return / episodes}")
         global_success_rate = MPI.COMM_WORLD.allreduce(local_success_rate, op=MPI.SUM)
         global_success_rate /= MPI.COMM_WORLD.Get_size()
         return global_success_rate
@@ -477,7 +484,7 @@ def main():
 
     env_cfg = PICK_PLACE_DEFAULT_ENV_CFG
     env_cfg['pick_only'] = True
-    env_cfg['horizon'] = 150
+    env_cfg['horizon'] = 500
     env_cfg['initialization_noise'] = None
     env_cfg['use_states'] = args.use_states
     env_cfg['dense_reward'] = args.dense_reward
@@ -507,7 +514,7 @@ def main():
             future_goals=int(args.k))
         
     elif args.action == 'rollout':
-        # env_cfg['has_renderer'] = True
+        env_cfg['has_renderer'] = True
         env = PickPlaceWrapper(env_config=env_cfg, 
                 task=Task[args.task.upper()])
         agent = DDPGHERAgent(env=env, env_cfg=env_cfg, obs_dim=env.obs_dim, 
@@ -522,8 +529,8 @@ def main():
             checkpoint_dir=args.checkpoint,
             helper_policy_dir=args.reach_pi,
             descr='ROLLOUT')
-        # agent.rollout(episodes=20, steps=args.horizon)
-        agent._evaluate(episodes=100)
+        agent.rollout(episodes=20, steps=args.horizon)
+        # agent._evaluate(episodes=100)
 
 if __name__ == '__main__':
     main()
