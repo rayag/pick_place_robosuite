@@ -164,3 +164,10 @@ python vis/visualize -d trained_models/reach_model/
 `rl_agent` съдържа кода на агентите, има 4 агента: *DDPG*, *DDPG+PER*, *DDPG+HER*, *High-Level Choreograph*, кодът за специално *Reach* е изведен в друг файл заради добавена специфика, описана в дипломната работа. Кодът на High-Level хореографа НЕ Е параметризиран, надявам се в следващи версии да успея да го направя.     
 `subtask_agents` това са агенти, изпълняващи подзадачи с вече тренирани модели.
 `vis` съдържа код с визуализации, част от кода се отнася до диаграми, представени в дипломната работа, затова не е част от оснавната функционалност.
+
+Източници:
+- https://towardsdatascience.com/linear-regression-with-pytorch-eb6dedead817
+- https://github.com/Howuhh/prioritized_experience_replay
+- https://youtu.be/-QWxJ0j9EY8
+- https://arshren.medium.com/step-by-step-guide-to-implementing-ddpg-reinforcement-learning-in-pytorch-9732f42faac9
+- https://github.com/TianhongDai/hindsight-experience-replay

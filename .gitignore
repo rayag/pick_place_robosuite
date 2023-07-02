@@ -19,3 +19,4 @@ video/
 .vscode/
 results/*
 progress.csv
+agents/*
