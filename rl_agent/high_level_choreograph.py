@@ -94,23 +94,43 @@ class HighLevelAgent(nn.Module):
             print(f"Loading from {path} device {device}")
             self.load_state_dict(torch.load(os.path.join(path, 'weights.pth'), map_location=device))
 
-    def rollout(self, env, episodes=10, render = False):
+    def rollout(self, env, episodes=10, total_timesteps = 500, render = False):
         total_return = 0
+        total_dones = 0
         for e in range(episodes):
             obs, _ = env.reset()
             ep_return = 0
-            for t in range(10):
+            t = 0
+            while t < total_timesteps:
                 obs = torch.Tensor(obs)
                 action, _, _ = self.get_action(obs)
-                print(f"Action: {action}")
-                next_obs, reward, next_done = self.step(obs=obs, env=env, action=action.cpu().numpy(), render=render)
+                next_obs, reward, next_done, steps = self.step(obs=obs, env=env, action=action.cpu().numpy(), render=render)
                 ep_return += reward
                 obs = next_obs
+                t += steps
                 if render:
                     env.render()
             total_return += ep_return
+            total_dones += next_done
             print(f"<--Return: {ep_return}-->")
-        print(f"Mean return {total_return / episodes}")
+        print(f"Mean return {total_return / episodes} Success rate {total_dones / episodes}")
+
+    def _running_average(self, x, n = 10):
+        mavg = np.zeros_like(x, dtype=np.float32)
+        for i in range(1, x.shape[0]+1):
+            if i > n:
+                mavg[i-1] = np.mean(x[i-n:i])
+            else:
+                mavg[i-1] = np.mean(x[:i])
+        return mavg
+
+    def visualize_results(self, path):
+        returns_df = pd.read_csv(os.path.join(path, "returns.csv"))
+        plt.plot(returns_df['return'], color="#85C1E9", label="Награда")
+        plt.plot(self._running_average(returns_df['return'] ), '-.', color='red', label="Пълзящо средно (10)")
+        plt.grid(color='#E8E8E8', linestyle='dashed')
+        plt.legend(loc="upper left")
+        plt.show()
 
     def train(self, env): 
         seed = 1
@@ -120,7 +140,7 @@ class HighLevelAgent(nn.Module):
         optimizer = optim.Adam(self.parameters(), lr=1e-4, eps=1e-5)
 
         episode_len = 10
-        total_timesteps = 10000
+        total_timesteps = 100000
         update_epochs = 50
         batch_size = 10
         learning_rate = 1e-4
@@ -158,7 +178,7 @@ class HighLevelAgent(nn.Module):
                     values[t] = value
                     actions[t] = action
                     logprobs[t] = logprob
-                next_obs, reward, next_done = self.step(obs, action.cpu().numpy(), env)
+                next_obs, reward, next_done,_ = self.step(obs, action.cpu().numpy(), env)
                 rewards[t] = reward
                 episode_return += reward
                 next_obs = torch.Tensor(next_obs).to(device)
@@ -221,9 +241,10 @@ def main():
     # env_cfg['has_renderer'] = True
     env = PickPlaceWrapper(env_cfg)
     agent = HighLevelAgent(env)
-    agent.train(env)
-    # agent.load_from('./results/HLC-2023-02-13-23-07-49')
-    # agent.rollout(env, episodes=3, render=True)
+    # agent.visualize_results('./results/HLC-2023-02-25-20-01-57')
+    # agent.train(env)
+    agent.load_from('./results/HLC-2023-02-25-20-01-57')
+    agent.rollout(env, episodes=200, render=False)
 
 
 if __name__ == '__main__':

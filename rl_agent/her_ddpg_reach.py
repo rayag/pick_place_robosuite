@@ -216,13 +216,31 @@ class DDPGHERAgent:
                 action = self.actor(obs_goal_norm_torch)
                 action_dateched = action.cpu().detach().numpy()\
                     .clip(self.env.actions_low, self.env.actions_high)
-                next_obs, achieved_goal = self.env.step(action_dateched)
+                next_obs, achieved_goal, _ = self.env.step(action_dateched)
                 reward = self.reward_fn(achieved_goal, goal)
                 done = (reward == 0)
                 obs = next_obs
                 t += 1
                 ep_return += reward
                 self.env.render()
+            if done:
+                goal = np.array([-0.037, -0.104, 0.996])
+                done = False
+                t = 0
+                while not done and t < steps:
+                    obs_norm = np.squeeze(self.obs_normalizer.normalize(obs))
+                    goal_norm = np.squeeze(self.goal_normalizer.normalize(goal))
+                    obs_goal_norm_torch = torch.FloatTensor(np.concatenate((obs_norm, goal_norm))).to(device)
+                    action = self.actor(obs_goal_norm_torch)
+                    action_dateched = action.cpu().detach().numpy()\
+                        .clip(self.env.actions_low, self.env.actions_high)
+                    next_obs, achieved_goal, _ = self.env.step(action_dateched)
+                    reward = self.reward_fn(achieved_goal, goal)
+                    done = (reward == 0)
+                    obs = next_obs
+                    t += 1
+                    ep_return += reward
+                    self.env.render()
             print(f"Episode {ep}: return {ep_return} done {done}")
 
     def _run_helper_policy_till_completion(self, obs, render=False):
@@ -239,7 +257,7 @@ class DDPGHERAgent:
             action = self.helper_policy(obs_goal_norm_torch)
             action_detached = action.cpu().detach().numpy()\
                 .clip(self.env.actions_low, self.env.actions_high)
-            next_obs, achieved_goal = self.env.step(action_detached)
+            next_obs, achieved_goal, _ = self.env.step(action_detached)
             done = self.env.calc_reward_reach_sparse(achieved_goal, goal) == 0
             if not done:
                 goal[:3] = self.env.extract_can_pos_from_obs(next_obs)+ np.random.uniform(0.001, 0.003)
@@ -309,7 +327,7 @@ class DDPGHERAgent:
                             action = self.actor(obs_goal_norm_torch)
                             action_detached = (action.cpu().detach().numpy()+np.random.normal(scale=0.1, size=self.action_dim))\
                                 .clip(self.env.actions_low, self.env.actions_high)
-                        next_obs, achieved_goal = self.env.step(action_detached)
+                        next_obs, achieved_goal, _ = self.env.step(action_detached)
                         reward = self.reward_fn(achieved_goal, goal)
                         if not success and reward == 0.0:
                             iteration_success_count += 1
@@ -322,9 +340,9 @@ class DDPGHERAgent:
                         ep_achieved_goals[t] = achieved_goal
                         ep_desired_goals[t] = goal
                         obs = next_obs
-                        if np.linalg.norm(original_can_pos - self.env.extract_can_pos_from_obs(next_obs)) > 0.002 and reward != 0:
-                            goal[:3] = self.env.extract_can_pos_from_obs(next_obs) + np.random.uniform(0.001, 0.003)
-                            original_can_pos = goal[:3]
+                        # if np.linalg.norm(original_can_pos - self.env.extract_can_pos_from_obs(next_obs)) > 0.002 and reward != 0:
+                        #     goal[:3] = self.env.extract_can_pos_from_obs(next_obs) + np.random.uniform(0.001, 0.003)
+                        #     original_can_pos = goal[:3]
                     self.replay_buffer.add_episode(ep_obs, ep_actions, ep_next_obs, ep_rewards, ep_achieved_goals, ep_desired_goals)
                 if started_episodes > 0: # if the goal is satisfied at the beginning, we do not start the episode
                     if self.normalize_data:
@@ -333,7 +351,7 @@ class DDPGHERAgent:
                 actor_loss, critic_loss, value = self.update()
                 self.logger.add(0, actor_loss, critic_loss, iteration_success_count, value)
             end_epoch = time.time()
-            success_rate_eval = self._evaluate(10 if self.proc_count <= 4 else 5)
+            success_rate_eval = self._evaluate(10 if self.proc_count < 4 else 5)
             if epoch > 0 and epoch % 5 == 0:
                 exploration_eps = exploration_eps * exploration_eps_decay
 
@@ -410,11 +428,11 @@ class DDPGHERAgent:
                 action = self.actor(obs_goal_norm_torch)
                 action_dateched = action.cpu().detach().numpy()\
                     .clip(self.env.actions_low, self.env.actions_high)
-                next_obs, achieved_goal = self.env.step(action_dateched)
+                next_obs, achieved_goal, _ = self.env.step(action_dateched)
                 reward = self.reward_fn(achieved_goal, goal)
                 done = (reward == 0)
-                if np.linalg.norm(original_can_pos - self.env.extract_can_pos_from_obs(next_obs)) > 0.002 and not done:
-                    goal[:3] = self.env.extract_can_pos_from_obs(next_obs) + np.random.uniform(low=0.001, high=0.003)
+                # if np.linalg.norm(original_can_pos - self.env.extract_can_pos_from_obs(next_obs)) > 0.002 and not done:
+                #     goal[:3] = self.env.extract_can_pos_from_obs(next_obs) + np.random.uniform(low=0.001, high=0.003)
                 obs = next_obs
                 t += 1
                 ep_return += reward

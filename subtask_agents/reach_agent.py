@@ -48,7 +48,7 @@ class ReachAgent:
             t += 1
             if render:
                 env.render()
-        return obs, total_reward, done
+        return obs, total_reward, done, t
 
     def _load_from(self, path):
         if os.path.exists(path):

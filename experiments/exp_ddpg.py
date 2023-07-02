@@ -39,11 +39,11 @@ def rollout(cfg: GlobalConfig):
     env_cfg['pick_only'] = False
     env_cfg['horizon'] = 150
     env_cfg['initialization_noise'] = None
-    env_cfg['has_renderer'] = True
+    # env_cfg['has_renderer'] = True
     #experiment 
     env_cfg['use_states']=True
     env_cfg['pick_only'] = False
-    env = PickPlaceWrapper(env_config=env_cfg, task=Task.REACH)
+    env = PickPlaceWrapper(env_config=env_cfg, task=Task.PICK_AND_PLACE)
     agent = DDPGAgent(env, 
         obs_dim=env.obs_dim, 
         action_dim=env.action_dim, 
@@ -51,10 +51,11 @@ def rollout(cfg: GlobalConfig):
         update_iterations=16, 
         update_period=4, 
         use_experience=False,
+        descr="ROLLOUT",
         results_dir=cfg.results_dir,
         demo_dir=cfg.demo_dir,
         checkpoint_dir=cfg.checkpoint_dir)
-    agent.rollout(steps=20)
+    agent.rollout(episodes = 200, steps=500, render=False)
 
 
 def rollout_helper(cfg: GlobalConfig):

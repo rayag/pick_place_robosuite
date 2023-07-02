@@ -9,7 +9,8 @@ import pandas as pd
 from environment.pick_place_wrapper import PickPlaceWrapper, PICK_PLACE_DEFAULT_ENV_CFG, Task
 from replay_buffer.normalizer import Normalizer
 
-DEMO_PATH = "/home/rayageorgieva/uni/masters/pick_place_robosuite/demo/low_dim.hdf5"
+# DEMO_PATH = "/home/rayageorgieva/uni/masters/pick_place_robosuite/demo/low_dim.hdf5"
+DEMO_PATH = "/home/rayageorgieva/uni/masters/pick_place_robosuite/demo/mh/low_dim.hdf5"
 
 def inspect_env_data(visualize = False):
     env_cfg = PICK_PLACE_DEFAULT_ENV_CFG

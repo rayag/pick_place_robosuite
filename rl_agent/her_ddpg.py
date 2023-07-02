@@ -4,6 +4,7 @@ from replay_buffer.her_replay_buffer import HERReplayBuffer
 from replay_buffer.normalizer import Normalizer
 from networks.actor import ActorNetwork, ActorNetworkLowDim
 from networks.critic import CriticNetwork, CriticNetworkLowDim
+from rl_agent.recovery_manager import RecoveryManager, RecoveryState
 
 from mpi4py import MPI
 from torch import nn
@@ -50,6 +51,13 @@ class DDPGHERAgent:
             action_low=self.env.actions_low, action_high=self.env.actions_high)
         self.critic = CriticNetworkLowDim(self.obs_dim, self.action_dim, self.goal_dim)
         self.critic_target = CriticNetworkLowDim(self.obs_dim, self.action_dim, self.goal_dim)
+        
+        RECOVERY_GOAL_DIM = 3 # position in the environment
+        RECOVERY_POLICY_PATH = "./agents/recovery/best"
+        self.recovery_policy = ActorNetworkLowDim(obs_dim=self.obs_dim + RECOVERY_GOAL_DIM, action_dim=self.action_dim)
+        self.recovery_obs_norm = Normalizer(self.obs_dim, input_clip_range)
+        self.recovery_goal_norm = Normalizer(RECOVERY_GOAL_DIM, input_clip_range)
+        self._load_policy(self.recovery_policy, RECOVERY_POLICY_PATH, self.recovery_obs_norm, self.recovery_goal_norm)
 
         if checkpoint_dir is not None:
             if MPI.COMM_WORLD.Get_rank() == 0:
@@ -97,6 +105,7 @@ class DDPGHERAgent:
                 os.makedirs(self.path)
             self._save_githash()
         self.logger = ProgressLogger(self.path)
+        self.recovery_manager = RecoveryManager(self.env)
 
     def init_replay_buffer(self, episode_len, normalize_data, input_clip_range, obs_normalizer, goal_normalizer):
         self.replay_buffer = HERReplayBuffer(capacity=int(1e6), 
@@ -111,21 +120,26 @@ class DDPGHERAgent:
             goal_normalizar=goal_normalizer,
             normalize_data=normalize_data)
 
-    def rollout(self, episodes = 10, steps = 250):
+    def rollout(self, episodes = 10, steps = 250, env_done_state = False):
+        '''
+        Runs a rollout executing REACH and then PLACE without recovery procedures
+        '''
         for ep in range(episodes):
             obs, goal = self.env.reset()
             print(f"Goal: {goal}")
             t = 0
             done = False
+            env_done = False
             ep_return = 0
             env_ep_return = 0
+            self.recovery_manager.reset()
 
             if self.helper_policy is not None:
-                obs, first_policy_done, _ = self._run_reach_policy_till_completion(obs, True)
+                obs, first_policy_done, reach_return, reach_t = self._run_reach_policy(obs, True)
                 print(f'Reach done: {first_policy_done}')
-
-            original_can_pos = self.env.extract_can_pos_from_obs(obs)
-            while t < steps:
+            env_ep_return += reach_return
+            pick_t = steps - reach_t
+            while t < pick_t:
                 obs_norm = np.squeeze(self.obs_normalizer.normalize(obs))
                 goal_norm = np.squeeze(self.goal_normalizer.normalize(goal))
                 obs_goal_norm_torch = torch.FloatTensor(np.concatenate((obs_norm, goal_norm))).to(device)
@@ -144,10 +158,62 @@ class DDPGHERAgent:
                 ep_return += reward
                 env_ep_return += env_reward
                 self.env.render()
+                if env_done_state and env_done:
+                    self.env.render()
+                    time.sleep(3)
+                    break
+                if not env_done_state and done:
+                    break
 
             print(f"Episode {ep}: return {ep_return} env_return {env_ep_return} done {done} env_done {env_done}")
 
-    def _run_reach_policy_till_completion(self, obs, render=False):
+
+    def rollout_with_states(self, episodes = 10, render = True, timesteps = 500):
+        '''
+        Runs a rollout using recovery states, see recover_manager
+        '''
+        successful_episodes = 0
+        sum_reward = 0
+        for _ in range(episodes):
+            obs, _ = self.env.reset()
+            self.recovery_manager.reset()
+            state = self.recovery_manager.state
+            episode_return = 0
+            done = False
+            t = 0
+
+            # uncomment if need to stop on success
+            # while state != RecoveryState.SUCCESS and state != RecoveryState.DEAD and t < 500:
+            while t < timesteps:
+                r = 0
+                t_curr = 0
+                if state == RecoveryState.REACH:
+                    r, t_curr = self._run_reach_policy_rec(obs, render, timesteps - t)
+                elif state == RecoveryState.PLACE:
+                    r, t_curr = self._run_place_policy_rec(obs, render, timesteps - t)
+                elif state == RecoveryState.RECOVERY:
+                    r, t_curr = self._run_recovery_rec(obs, render, timesteps - t)
+                elif state == RecoveryState.INITIAL:
+                    state = self.recovery_manager.get_next_state(obs)
+                else:
+                    t_curr = 1
+                    r = self.env.reward()
+                state = self.recovery_manager.state
+                if not done and state == RecoveryState.SUCCESS:
+                    successful_episodes += 1
+                    done = True
+                episode_return += r
+                print(f"main {state}")
+                t += t_curr   
+            
+            if render:            
+                for _ in range(10):
+                    self.env.render()
+            sum_reward += episode_return
+            print(f"return: {episode_return}")
+        print(f'Success rate {successful_episodes / episodes} Mean reward {sum_reward / episodes}')
+
+    def _run_reach_policy(self, obs, render=False):
         # running the reach task
         done = False
         goal = self.env.generate_goal_reach()
@@ -155,30 +221,106 @@ class DDPGHERAgent:
         original_task = self.env.task
         self.env.set_task(Task.REACH)
         self.env.use_predefined_states = True
-        done_cnt = 3
         t = 0
+        env_return = 0
         original_can_pos = self.env.extract_can_pos_from_obs(obs)
-        while done_cnt > 0 and t < self.helper_T:
+        while t < self.helper_T:
             obs_norm = np.squeeze(self.helper_obs_norm.normalize(obs))
             goal_norm = np.squeeze(self.helper_goal_norm.normalize(goal))
             obs_goal_norm_torch = torch.FloatTensor(np.concatenate((obs_norm, goal_norm))).to(device)
             action = self.helper_policy(obs_goal_norm_torch)
             action_detached = action.cpu().detach().numpy()\
                 .clip(self.env.actions_low, self.env.actions_high)
-            next_obs, _,_,_, achieved_goal = self.env.step(action_detached)
+            next_obs, env_reward, _, _, achieved_goal = self.env.step(action_detached)
             done = self.env.calc_reward_reach_sparse(achieved_goal, goal) == 0
             if np.linalg.norm(original_can_pos - self.env.extract_can_pos_from_obs(next_obs)) > 0.002 and not done:
                 goal[:3] = self.env.extract_can_pos_from_obs(next_obs)+ np.random.uniform(0.001, 0.003)
-                done_cnt = 3
-            else:
-                done_cnt -= 1
+                original_can_pos = self.env.extract_can_pos_from_obs(next_obs)
+            print(self.recovery_manager.get_next_state(next_obs))
             obs = next_obs
+            env_return += env_reward
             t += 1
             if render:
                 self.env.render()
         self.env.set_task(original_task)
-        print("blah")
-        return obs, done, t
+        return obs, done, env_reward, t
+    
+    def _run_reach_policy_rec(self, obs, render=False, t_limit = 100):
+        # running the reach task
+        t = 0
+        goal = self.env.generate_goal_reach()
+        original_task = self.env.task
+        self.env.set_task(Task.REACH)
+        self.env.use_predefined_states = True
+        env_return = 0
+        original_can_pos = self.env.extract_can_pos_from_obs(obs)
+        state = self.recovery_manager.state
+        while state == RecoveryState.REACH and t < t_limit:
+            obs_norm = np.squeeze(self.helper_obs_norm.normalize(obs))
+            goal_norm = np.squeeze(self.helper_goal_norm.normalize(goal))
+            obs_goal_norm_torch = torch.FloatTensor(np.concatenate((obs_norm, goal_norm))).to(device)
+            action = self.helper_policy(obs_goal_norm_torch)
+            action_detached = action.cpu().detach().numpy()\
+                .clip(self.env.actions_low, self.env.actions_high)
+            next_obs, _, _, _, achieved_goal = self.env.step(action_detached)
+            env_reward = self.env.reward()
+            if np.linalg.norm(original_can_pos - self.env.extract_can_pos_from_obs(next_obs)) > 0.002:
+                goal[:3] = self.env.extract_can_pos_from_obs(next_obs)+ np.random.uniform(0.001, 0.003)
+                original_can_pos = self.env.extract_can_pos_from_obs(next_obs)
+            state = self.recovery_manager.get_next_state(next_obs)
+            obs = next_obs
+            env_return += env_reward
+            if render:
+                self.env.render()
+            t += 1
+        self.env.set_task(original_task)
+        return env_return, t
+    
+    def _run_place_policy_rec(self, obs, render=False, t_limit=100):
+        goal = self.env.generate_goal_pick_and_place()
+        state = self.recovery_manager.state
+        ep_return = 0
+        t = 0
+
+        while state == RecoveryState.PLACE and t < t_limit:
+            obs_norm = np.squeeze(self.obs_normalizer.normalize(obs))
+            goal_norm = np.squeeze(self.goal_normalizer.normalize(goal))
+            obs_goal_norm_torch = torch.FloatTensor(np.concatenate((obs_norm, goal_norm))).to(device)
+            action = self.actor(obs_goal_norm_torch)
+            action_dateched = action.cpu().detach().numpy()\
+                .clip(self.env.actions_low, self.env.actions_high)
+            next_obs, _, env_done, _, achieved_goal = self.env.step(action_dateched)
+            reward = self.reward_fn(achieved_goal, goal)
+            env_reward = self.env.reward()
+            ep_return += env_reward
+            state = self.recovery_manager.get_next_state(next_obs)
+            obs = next_obs
+            if render:
+                self.env.render()
+            t += 1
+        return ep_return, t
+
+    def _run_recovery_rec(self, obs, render=False, t_limit=100):
+        goal = self.recovery_manager.recovery_goal
+        state = self.recovery_manager.state
+        env_return = 0
+        t = 0
+        while state == RecoveryState.RECOVERY and t < t_limit:
+            obs_norm = np.squeeze(self.recovery_obs_norm.normalize(obs))
+            goal_norm = np.squeeze(self.recovery_goal_norm.normalize(goal))
+            obs_goal_norm_torch = torch.FloatTensor(np.concatenate((obs_norm, goal_norm))).to(device)
+            action = self.recovery_policy(obs_goal_norm_torch)
+            action_detached = action.cpu().detach().numpy()\
+                .clip(self.env.actions_low, self.env.actions_high)
+            next_obs, _, _, _, _ = self.env.step(action_detached)
+            env_reward = self.env.reward()
+            env_return += env_reward
+            obs = next_obs
+            state = self.recovery_manager.get_next_state(next_obs)
+            if render:
+                self.env.render()
+            t += 1
+        return env_return, t
 
     def train(self, epochs=200, iterations_per_epoch=100, episodes_per_iter=1000, exploration_eps=0.1, future_goals = 4):
         exploration_eps_decay = 0.98
@@ -197,7 +339,7 @@ class DDPGHERAgent:
                     obs, goal = self.env.reset()
                     if self.helper_policy is not None:
                         if np.random.rand() < 0.5:
-                            obs, helper_done, _ = self._run_reach_policy_till_completion(obs)
+                            obs, helper_done, _, _ = self._run_reach_policy(obs)
                             helper_cnt += 1
                             if helper_done:
                                 helper_success += 1
@@ -312,18 +454,21 @@ class DDPGHERAgent:
         successful_episodes = 0
         env_successful_episodes = 0
         print(f"{MPI.COMM_WORLD.Get_rank()} Start eval")
-        total_env_return = 0
+        env_total_returns = 0
+        env_total_success_returns = 0
         for ep in range(episodes):
             obs, goal = self.env.reset()
             while self.reward_fn(self.env.get_achieved_goal_from_obs(obs), goal) == 0:
                 obs, goal = self.env.reset() # sample goal until it is not initially satisfied
             if self.helper_policy is not None:
-                obs, _, reach_timesteps = self._run_reach_policy_till_completion(obs, render)
+                obs, _, reach_return, reach_t = self._run_reach_policy(obs, render)
             t = 0
             done = False
+            env_total_returns += reach_return
             ep_return = 0
-            pick_timesteps = self.episode_len - reach_timesteps
-            while t < pick_timesteps:
+            ep_env_return = 0
+            pick_t = self.episode_len - reach_t
+            while t < pick_t:
                 obs_norm = np.squeeze(self.obs_normalizer.normalize(obs))
                 goal_norm = np.squeeze(self.goal_normalizer.normalize(goal))
                 obs_goal_norm_torch = torch.FloatTensor(np.concatenate((obs_norm, goal_norm))).to(device)
@@ -332,20 +477,24 @@ class DDPGHERAgent:
                     .clip(self.env.actions_low, self.env.actions_high)
                 next_obs, env_reward, env_done, _, achieved_goal = self.env.step(action_dateched)
                 reward = self.reward_fn(achieved_goal, goal)
+                env_total_returns += env_reward
                 done = (reward == 0)
                 obs = next_obs
                 t += 1
                 ep_return += reward
-                total_env_return += env_reward
+                ep_env_return += env_reward
                 if render:
                     self.env.render()
             if done:
                 successful_episodes += 1
             if env_done:
                 env_successful_episodes += 1
+                env_total_success_returns += ep_env_return
         local_success_rate = successful_episodes / episodes
         print(f"{MPI.COMM_WORLD.Get_rank()} success rate {local_success_rate} env success rate {env_successful_episodes / episodes}")
-        print(f"env return AVG {total_env_return / episodes}")
+        print(f"Mean episode return {env_total_returns / episodes}")
+        print(f"Env total success returns {env_total_success_returns / env_successful_episodes}  {env_total_success_returns}")
+
         global_success_rate = MPI.COMM_WORLD.allreduce(local_success_rate, op=MPI.SUM)
         global_success_rate /= MPI.COMM_WORLD.Get_size()
         return global_success_rate
@@ -393,7 +542,7 @@ class DDPGHERAgent:
         with open(os.path.join(self.path, "githash"), 'w+') as f:
             f.write(sha)
     
-    def _load_policy(self, policy, path,obs_norm=None, goal_norm=None):
+    def _load_policy(self, policy, path, obs_norm=None, goal_norm=None):
         if os.path.exists(path):
             print(f"Loading policy from {path}")
             policy.load_state_dict(torch.load(os.path.join(path, 'actor_weights.pth'), map_location=device))
@@ -475,10 +624,12 @@ def main():
     parser.add_argument('--use_states', default=False, action='store_true', help="If true, the agent uses predefined states")
     parser.add_argument('--start_from_middle', default=False, action='store_true', help="For pick_and_place agent, if true, starts episodes with already picked object")
     parser.add_argument('-a', '--action', choices=['train', 'rollout'], default='train')
-    parser.add_argument('-t', '--task', type=str, choices=['reach', 'pick', 'pick_and_place'])
+    parser.add_argument('-t', '--task', type=str, default='reach', choices=['reach', 'pick', 'pick_and_place'])
     parser.add_argument('--reach_pi', type=str, help="Path to saved reach agent")
     parser.add_argument('--dense_reward', action='store_true', default=False, help="if set, we use dense reward")
     parser.add_argument('--descr', type=str, default="", help="Description, appended to the directory name")
+    parser.add_argument('--est_obj_pos', type=bool, default=False, help="If yes, object position is estimated, rather than gotten from the env.")
+    parser.add_argument('--rec', type=bool, default=True, help="If set, applies recovery procedures")
     args = parser.parse_args()
     print(f"Actor alpha {args.actor_lr}, Critic alpha {args.critic_lr} Normalize {args.normalize} Task {args.task} Helper policy {args.reach_pi}")
 
@@ -489,6 +640,7 @@ def main():
     env_cfg['use_states'] = args.use_states
     env_cfg['dense_reward'] = args.dense_reward
     env_cfg['start_from_middle'] = args.start_from_middle
+    env_cfg['estimate_obj_pos'] = args.est_obj_pos
     
     if args.action == 'train':
         env = PickPlaceWrapper(env_config=env_cfg, 
@@ -529,8 +681,11 @@ def main():
             checkpoint_dir=args.checkpoint,
             helper_policy_dir=args.reach_pi,
             descr='ROLLOUT')
-        agent.rollout(episodes=20, steps=args.horizon)
-        # agent._evaluate(episodes=100)
+        # agent._evaluate(200)
+        if args.rec:
+            agent.rollout_with_states(episodes=20, render=True)
+        else:
+            agent.rollout(episodes=20, steps=args.horizon, env_done_state=True)
 
 if __name__ == '__main__':
     main()
