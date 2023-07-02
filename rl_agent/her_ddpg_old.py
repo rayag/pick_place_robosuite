@@ -230,6 +230,7 @@ class DDPGHERAgent:
         self.env.use_predefined_states = True
         self.env.move_object = False
         t = 0
+        original_can_pos = self.env.extract_can_pos_from_obs(obs)
         while not done and t < self.helper_T:
             obs_norm = np.squeeze(self.helper_obs_norm.normalize(obs))
             goal_norm = np.squeeze(self.helper_goal_norm.normalize(goal))
@@ -239,8 +240,8 @@ class DDPGHERAgent:
                 .clip(self.env.actions_low, self.env.actions_high)
             next_obs, achieved_goal, _ = self.env.step(action_detached)
             done = self.env.calc_reward_reach_sparse(achieved_goal, goal) == 0
-            if not done:
-                goal[:3] = self.env.extract_can_pos_from_obs(next_obs)+ 0.001
+            if np.linalg.norm(original_can_pos - self.env.extract_can_pos_from_obs(next_obs)) > 0.002 and not done:
+                    goal[:3] = self.env.extract_can_pos_from_obs(next_obs) + np.random.uniform(low=0.001, high=0.003)
             obs = next_obs
             t += 1
             if render:

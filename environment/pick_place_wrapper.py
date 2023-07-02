@@ -1,12 +1,17 @@
 import robosuite as suite
 import gym
 import os
+import torch
 import h5py
+from PIL import Image
 import numpy as np
+import matplotlib.pyplot as plt
 from enum import Enum
 from mpi4py import MPI
 from robosuite.wrappers import GymWrapper
 from robosuite.environments.manipulation.pick_place import PickPlace
+from yolov7.detect import detect_img
+from object_detection.linear_regression import LinearRegression
 
 DEMO_PATH = "/home/raya/uni/ray_test/data/demo/low_dim.hdf5"
 
@@ -18,6 +23,7 @@ PICK_PLACE_DEFAULT_ENV_CFG = {
     "gripper_types": "RethinkGripper",
     "has_renderer": False,
     "has_offscreen_renderer": False,
+    "camera_names": ['agentview'],
     "reward_shaping": True,
     "use_camera_obs": False,
     "use_object_obs": True,
@@ -28,8 +34,9 @@ PICK_PLACE_DEFAULT_ENV_CFG = {
     "use_states": False,
     "start_from_middle": False,
     "initialization_noise": None,
-    "render_camera": "frontview",
-    'p_goal_air': 1
+    "render_camera": "agentview",
+    'p_goal_air': 1,
+    "estimate_obj_pos": False
 }
 
 class Task(Enum):
@@ -67,8 +74,13 @@ class PickPlaceWrapper(gym.Env):
         self.goal_dim = 6
         self.prob_goal_air = env_config['p_goal_air']
         self.dense_reward = env_config['reward_shaping']
+        self.estimate_obj_pos = env_config['estimate_obj_pos']
+        self.est_pos = np.zeros(shape=(3,))
+        self.est_i = 0
+        self.est_pos = None
         self.load_starting_states_for_pick()
         self.load_starting_states_for_reach()
+        self.i = 0
 
     def reset(self):
         if self.use_states:
@@ -78,13 +90,14 @@ class PickPlaceWrapper(gym.Env):
             else:
                 states = self.starting_states_pick
             i = np.random.choice(len(states))
+            print(f"<--  STATE {i} ")
             return self.reset_to(states[i])
-        return self.gym_env.reset(), self.generate_goal()
+        return self.process_obs(self.gym_env.reset()), self.generate_goal()
 
     def reset_to(self, state):
         self.gym_env.env.sim.set_state_from_flattened(state)
         self.gym_env.env.sim.forward()
-        return self.gym_env._flatten_obs(self.gym_env.env._get_observations(force_update=True)), self.generate_goal()
+        return self.process_obs(self.gym_env._flatten_obs(self.gym_env.env._get_observations(force_update=True))), self.generate_goal()
 
     def render(self):
         self.gym_env.render()
@@ -109,7 +122,12 @@ class PickPlaceWrapper(gym.Env):
             else:
                 reward = reach
         # for PICK_AND_PLACE the reward is the original one
+        obs = self.process_obs(obs)
         return obs, reward, reward == 1, info, self.get_achieved_goal_from_obs(obs)
+    
+    def step_random(self):
+        action = np.random.uniform(low=-1, high=1, size=(self.action_dim))
+        self.step(action)
 
     def reward(self):
         return self.gym_env.env.reward()
@@ -117,7 +135,7 @@ class PickPlaceWrapper(gym.Env):
     def load_starting_states_for_pick(self):
         if (not self.use_states):
             return
-        path = os.path.join("./data/finished_reach/", f"data{MPI.COMM_WORLD.Get_rank()}.hdf5")
+        path = os.path.join("./data/states_pick/", f"data{MPI.COMM_WORLD.Get_rank()}.hdf5")
         with h5py.File(path, "r+") as g:
             states = list(g["states"].keys())
             assert len(states) > 0
@@ -131,7 +149,7 @@ class PickPlaceWrapper(gym.Env):
     def load_starting_states_for_reach(self):
         if (not self.use_states):
             return
-        path = os.path.join("./data/successful_reach/", f"data{MPI.COMM_WORLD.Get_rank()}.hdf5")
+        path = os.path.join("./data/states_reach/", f"data{MPI.COMM_WORLD.Get_rank()}.hdf5")
         with h5py.File(path, "r+") as g:
             states = list(g["states"].keys())
             assert len(states) > 0
@@ -149,6 +167,11 @@ class PickPlaceWrapper(gym.Env):
             return self.generate_goal_pick()
         elif self.task == Task.PICK_AND_PLACE:
             return self.generate_goal_pick_and_place()
+        
+    def get_bin_size(self):
+        CAN_IDX = 3 # TODO: make this work for all objects
+        rs_env = self.gym_env.env
+        return rs_env.bin_size[0] / 2.0, rs_env.bin_size[1] / 2.0
 
     def generate_goal_pick_and_place(self):
         CAN_IDX = 3 # TODO: make this work for all objects
@@ -180,7 +203,7 @@ class PickPlaceWrapper(gym.Env):
         # Goal is EEF end pos (x,y,z) and distance from EEF to Can
         rs_env = self.gym_env.env
         obj_pos = rs_env.sim.data.body_xpos[rs_env.obj_body_id['Can']]
-        return np.array([obj_pos[0], obj_pos[1], obj_pos[2] + np.random.uniform(low=0.001, high=0.005), 0, 0, 0])
+        return np.array([obj_pos[0], obj_pos[1], obj_pos[2] + 0.003, 0, 0, 0])
 
     def extract_eef_pos_from_obs(self, obs):
         return obs[35:38]
@@ -196,10 +219,29 @@ class PickPlaceWrapper(gym.Env):
             return np.concatenate((self.extract_can_pos_from_obs(obs), self.extract_can_to_eef_dist_from_obs(obs)))
         elif self.task == Task.REACH:
             return np.concatenate((self.extract_eef_pos_from_obs(obs), self.extract_can_to_eef_dist_from_obs(obs)))
+        
+    def process_obs(self, obs):
+        if self.task != Task.REACH:
+            return obs
+        if self.estimate_obj_pos and (self.est_pos is None or self.est_i % 10 == 0):
+            img = Image.fromarray(self.gym_env.env.get_pixel_obs())
+            img_arr = np.array(img)
+            if not np.all(img_arr == 0):
+                est_pos = detect_img(img_arr)
+                if est_pos is not None:
+                    self.est_pos = est_pos
+                else:
+                    print("<--   NONE   -->")
+        real_pos = obs[:2]
+        # print(f"Real: {real_pos} Est: {self.est_pos}")
+        if self.est_pos is not None:
+            obs[:2] = self.est_pos[:2]
+        self.est_i += 1
+        return obs
 
     @staticmethod
     def calc_reward_pick_sparse(achieved_goal, desired_goal):
-        goal_reached = np.linalg.norm(achieved_goal - desired_goal, axis=-1) < 0.01
+        goal_reached = np.linalg.norm(achieved_goal - desired_goal, axis=-1) < 0.02
         return 0.0 if goal_reached else -1.0
 
     @staticmethod
@@ -209,7 +251,7 @@ class PickPlaceWrapper(gym.Env):
 
     @staticmethod
     def calc_reward_reach_sparse(achieved_goal, desired_goal):
-        goal_reached = np.linalg.norm(achieved_goal[3:] - desired_goal[3:], axis=-1) < 0.005
+        goal_reached = np.linalg.norm(achieved_goal[3:] - desired_goal[3:], axis=-1) < 0.02
         return 0 if goal_reached else -1
 
     def get_reward_fn(self):
@@ -247,3 +289,21 @@ class PickPlaceWrapper(gym.Env):
     def actions_low(self):
         return self.action_space.low
 
+
+def main():
+    cfg = PICK_PLACE_DEFAULT_ENV_CFG.copy()
+    cfg['use_camera_obs']=False
+    cfg['has_offscreen_renderer']=False
+    cfg['has_renderer']=True
+    cfg['estimate_obj_pos']=True
+    env = PickPlaceWrapper(cfg)
+    env.render()
+    env.reset()
+    for _ in range(3):
+        env.step_random()
+        print( env.get_state_dict() )
+        env.render()
+    
+
+if __name__ == '__main__':
+    main()

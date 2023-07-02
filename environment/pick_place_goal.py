@@ -1,4 +1,3 @@
-from environment.pick_place_can_grabbed import PickPlaceGrabbedCan
 from environment.pick_place_wrapper import PickPlaceWrapper, PICK_PLACE_DEFAULT_ENV_CFG, Task
 from replay_buffer.simple_replay_buffer import SimpleReplayBuffer
 import gym
@@ -28,7 +27,7 @@ class PickPlaceGoalPick(gym.Env):
         self.env_wrapper.gym_env.seed(seed)
         self.move_object = move_object
         self.discard_gripper = not move_object
-        self.goal_dim = 6 # coordinates of the object
+        self.goal_dim = 3 # coordinates of the object
         self.observation_space = self.env_wrapper.gym_env.observation_space
         self.action_space = self.env_wrapper.gym_env.action_space
         self.goal = None
@@ -118,7 +117,7 @@ class PickPlaceGoalPick(gym.Env):
         if self.move_object:
             return self.generate_goal_pick_place()
         else:
-            return self.generate_goal_reach()
+            return self.generate_goal_reach_tmp()
     
     def generate_goal_pick(self):
         rs_env = self.env_wrapper.gym_env.env
@@ -138,6 +137,9 @@ class PickPlaceGoalPick(gym.Env):
         rs_env = self.env_wrapper.gym_env.env
         obj_pos = rs_env.sim.data.body_xpos[rs_env.obj_body_id['Can']]
         return np.array([obj_pos[0], obj_pos[1], obj_pos[2] + np.random.uniform(low=0.001, high=0.005), 0, 0, 0])
+    
+    def generate_goal_reach_tmp(self):
+        return np.array([np.random.uniform(low=-0.2, high=0.2), np.random.uniform(low=-0.5, high=0.6), np.random.uniform(low=0.84, high=1)])
         
 
     def calc_reward_can(self, state_goal):
@@ -163,7 +165,8 @@ class PickPlaceGoalPick(gym.Env):
     def calc_reward_reach_sparse(achieved_goal, desired_goal):
         # achieved_gripper_pos = achieved_goal[:3]
         # desired_gripper_pos = desired_goal[:3]
-        goal_reached = np.linalg.norm(achieved_goal[3:] - desired_goal[3:], axis=-1) < 0.01
+        # goal_reached = np.linalg.norm(achieved_goal[3:] - desired_goal[3:], axis=-1) < 0.01
+        goal_reached = np.linalg.norm(achieved_goal - desired_goal, axis=-1) < 0.01
         return 0 if goal_reached else -1
 
     def render(self):
@@ -182,7 +185,8 @@ class PickPlaceGoalPick(gym.Env):
         if self.move_object:
             return np.concatenate((self.extract_can_pos_from_obs(obs), self.extract_can_to_eef_dist_from_obs(obs)))
         else:
-            return np.concatenate((self.extract_eef_pos_from_obs(obs), self.extract_can_to_eef_dist_from_obs(obs)))
+            return self.extract_eef_pos_from_obs(obs)
+            # return np.concatenate((self.extract_eef_pos_from_obs(obs), self.extract_can_to_eef_dist_from_obs(obs)))
 
     def get_reward_fn(self):
         if self.move_object:
@@ -222,7 +226,7 @@ class PickPlaceGoalPick(gym.Env):
         return self.action_space.low
 
     def load_starting_states_for_pick(self):
-        path = os.path.join("./data/finished_reach/", f"data{MPI.COMM_WORLD.Get_rank()}.hdf5")
+        path = os.path.join("./data/states_pick/", f"data{MPI.COMM_WORLD.Get_rank()}.hdf5")
         with h5py.File(path, "r+") as g:
             states = list(g["states"].keys())
             assert len(states) > 0
@@ -234,7 +238,7 @@ class PickPlaceGoalPick(gym.Env):
             self.starting_states_pick = states_np
 
     def load_starting_states_for_reach(self):
-        path = os.path.join("./data/successful_reach/", f"data{MPI.COMM_WORLD.Get_rank()}.hdf5")
+        path = os.path.join("./data/states_reach/", f"data{MPI.COMM_WORLD.Get_rank()}.hdf5")
         with h5py.File(path, "r+") as g:
             states = list(g["states"].keys())
             assert len(states) > 0
@@ -245,7 +249,7 @@ class PickPlaceGoalPick(gym.Env):
                 states_np[i] = state
             self.starting_states_reach = states_np
         
-DEMO_PATH = "/home/rayageorgieva/uni/masters/pick_place_robosuite/demo/low_dim.hdf5"
+DEMO_PATH = "/home/rayageorgieva/uni/masters/pick_place_robosuite/demo/mh/low_dim.hdf5"
 
 def get_goal(env: PickPlaceGoalPick, ep_obs):
     ag = env.extract_can_pos_from_obs(ep_obs[0])
@@ -259,26 +263,23 @@ def get_goal(env: PickPlaceGoalPick, ep_obs):
 
 def inspect_observations(visualize = False):
     env_cfg = PICK_PLACE_DEFAULT_ENV_CFG
-    env_cfg['pick_only'] = False
     if visualize:
         env_cfg['has_renderer'] = visualize
-    env = PickPlaceGoalPick(env_config=env_cfg, prob_goal_air=0, move_object=False)
+    env = PickPlaceGoalPick(env_config=env_cfg, prob_goal_air=0, move_object=True)
     with h5py.File(DEMO_PATH, "r+") as f:
         demos = list(f['data'].keys())
         print(f"Total episodes {len(demos)}")
         sum_steps = 0
         dist = []
-        for i in range(2,3):
+        for i in range(len(demos)):
             print(f"Episode {i} ...")
             ep = demos[i]
             ep_id = int(demos[i][5:])
             states = f["data/{}/states".format(ep)][()]
             acts = f["data/{}/actions".format(ep)][()]
-            obs_data = f["data/{}/obs_flat".format(ep)][()]
             obs, goal = env.reset_to(states[0])
             print()
             print(f"GOAL: {goal}")
-            # goal, _ = get_goal(env, obs_data)
             if goal is None:
                 continue
             
@@ -292,7 +293,7 @@ def inspect_observations(visualize = False):
                 else:
                     action = acts[t]
                     action[4:6] = 0
-                obs, achieved_goal = env.step(action)
+                obs, achieved_goal, _ = env.step(action)
                 reward = env.get_reward_fn()(achieved_goal, goal)
                 done = reward == 0.0
                 if done:
@@ -303,7 +304,7 @@ def inspect_observations(visualize = False):
                 if visualize:
                     env.render()
         dist = np.array(dist)
-        print(f"Mean dist: {np.mean(dist, axis=0)} Max: {np.max(dist, axis=0)}")
+        # print(f"Mean dist: {np.mean(dist, axis=0)} Max: {np.max(dist, axis=0)}")
 
 def sync_envs(env: PickPlaceGoalPick):
     comm = MPI.COMM_WORLD
@@ -315,16 +316,16 @@ def sync_envs(env: PickPlaceGoalPick):
 
 
 def main():
-    # inspect_observations(True)
-    cfg = PICK_PLACE_DEFAULT_ENV_CFG
-    cfg['has_renderer'] = True
-    cfg['initialization_noise'] = 'default'
-    env = PickPlaceGoalPick(cfg, move_object=True, use_predefined_states=True, start_from_middle=True)
-    for i in range(20):
-        env.reset()
-        env.render()
-        time.sleep(2)
-        print()
+    inspect_observations(True)
+    # cfg = PICK_PLACE_DEFAULT_ENV_CFG
+    # cfg['has_renderer'] = True
+    # cfg['initialization_noise'] = 'default'
+    # env = PickPlaceGoalPick(cfg, move_object=True, use_predefined_states=True, start_from_middle=True)
+    # for i in range(20):
+    #     env.reset()
+    #     env.render()
+    #     time.sleep(2)
+    #     print()
     
 
 if __name__ == "__main__":

@@ -119,13 +119,13 @@ class DDPGAgent:
         self.episode_len = episode_len
         self.init_replay_buffer(use_experience, demo_dir, episode_len)
 
-        self.actor = ActorNetworkLowDim(obs_dim=self.obs_dim, action_dim=self.action_dim)
-        self.actor_target = ActorNetworkLowDim(obs_dim=self.obs_dim, action_dim=self.action_dim)
+        self.actor = ActorNetwork(obs_dim=self.obs_dim, action_dim=self.action_dim)
+        self.actor_target = ActorNetwork(obs_dim=self.obs_dim, action_dim=self.action_dim)
         self.actor_target.load_state_dict(self.actor.state_dict())
         self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=1e-4)
 
-        self.critic = CriticNetworkLowDim(self.obs_dim, self.action_dim)
-        self.critic_target = CriticNetworkLowDim(self.obs_dim, self.action_dim)
+        self.critic = CriticNetwork(self.obs_dim, self.action_dim)
+        self.critic_target = CriticNetwork(self.obs_dim, self.action_dim)
         self.critic_target.load_state_dict(self.critic.state_dict())
         self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=1e-4)
 
@@ -155,7 +155,8 @@ class DDPGAgent:
         if use_experience:
             self.replay_buffer.load_examples_from_file(demo_dir)
 
-    def rollout(self, episodes = 10, steps = 250):
+    def rollout(self, episodes = 10, steps = 250, render = False):
+        total_ep_return = 0
         for ep in range(episodes):
             obs, _ = self.env.reset()
             t = 0
@@ -170,9 +171,13 @@ class DDPGAgent:
                 obs = next_obs
                 t += 1
                 ep_return += reward
-                self.env.render()
-            time.sleep(2)
+                if render:
+                    self.env.render()
+            total_ep_return += ep_return
             print(f"Episode {ep}: return {ep_return}")
+        print(f"Mean episode return {total_ep_return / episodes}")
+
+        
 
     def rollout_goal_env(self, env, obs, steps = 250):
         t = 0

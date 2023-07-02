@@ -4,6 +4,9 @@ import robosuite as suite
 import h5py
 import imageio
 import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from PIL import Image
 
 DEMO_PATH = "./demo/low_dim.hdf5"
 
@@ -20,8 +23,13 @@ def play_demos(n: int, record_video = False, video_path = "./video"):
         env_cfg['use_camera_obs'] = True
         env_cfg['camera_names'] = ['frontview']
     else:
-        env_cfg['has_renderer'] = True
-
+        # env_cfg['has_renderer'] = True
+        env_cfg['has_offscreen_renderer'] = True
+        env_cfg['use_camera_obs'] = True
+        env_cfg['camera_names'] = ['agentview']
+    xs = []
+    ys = []
+    zs = []
     env = PickPlaceWrapper(env_config=env_cfg)
     actions = list()
     video_writer = None
@@ -50,22 +58,36 @@ def play_demos(n: int, record_video = False, video_path = "./video"):
                     break
                 else:
                     action = actions[t]
-                obs, reward, done, _ = env.step(action)
+                obs, reward, done, _, _ = env.step(action)
                 ep_return = ep_return + reward
-                print(f"Reward: {reward} {rs[t]} Done: {done} {dones[t]}")
+                # print(f"Reward: {reward} {rs[t]} Done: {done} {dones[t]}")
                 if record_video:
                     video_writer.append_data(np.rot90(np.rot90((obs['frontview_image']))))
                 else:
-                    env.render()
+                    # env.render()
+                    if np.random.random() < 0.015:
+                        print(f"Creating img {len(xs)}...")
+                        o = env.get_state_dict()
+                        img = Image.fromarray(o['agentview_image'], 'RGB')
+                        img = img.transpose(method=Image.FLIP_TOP_BOTTOM)
+                        img.save(f'/home/rayageorgieva/uni/masters/pick_place_robosuite/data/img/img_d_{len(xs):03}.jpg')
+                        can_pos = o['Can_pos']
+                        xs.append(can_pos[0])
+                        ys.append(can_pos[1])
+                        zs.append(can_pos[2])
                 t = t + 1
+            df = pd.DataFrame({
+                'x': xs,
+                'y': ys,
+                'z': zs
+            })
+            df.to_csv('/home/rayageorgieva/uni/masters/pick_place_robosuite/data/img/d_coords.csv')
             print(f"Episode return {ep_return}")
             if video_writer:
                 video_writer.close()
 
-
-
 def main():
-    play_demos(10)
+    play_demos(100)
 
 if __name__ == "__main__":
     main()
